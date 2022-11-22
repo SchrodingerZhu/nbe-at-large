@@ -172,11 +172,11 @@ impl std::fmt::Display for Term {
 
 fn main() {
     let src = r#"
-        λ z . λ s . (let add2 = λ a . (s (s a)) in (
-            let two = (add2 z) in (
-                let four = (add2 two) in (
-                    add2 four
-                ) 
+        (let I = λ x . x in (
+            let K = λ x . λ y . x in (
+                let S = λ x . λ y . λ z . ((x z) (y z)) in (
+                    ((S I) I) S
+                )
             )
         ))
     "#;

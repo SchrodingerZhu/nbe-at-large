@@ -199,9 +199,11 @@ impl<'a> Context<'a> {
     fn from_closure<'b, I>(i: I) -> Context<'a>
     where
         I: Iterator<Item = &'b (UniqueName, Rc<Value<'a>>)>,
-        'a : 'b
+        'a: 'b,
     {
-        Context(std::cell::UnsafeCell::new(i.map(|x|(x.0.clone(), x.1.clone())).collect()))
+        Context(std::cell::UnsafeCell::new(
+            i.map(|x| (x.0.clone(), x.1.clone())).collect(),
+        ))
     }
 
     fn append<'b>(&'b self, name: UniqueName, value: Rc<Value<'a>>) -> Guard<'a, 'b> {
@@ -265,18 +267,19 @@ fn qoute(val: &Value) -> Box<CapAvoidTerm> {
         }
         Value::Lam(x, y, z) => {
             let ctx = Context::from_closure(y.iter());
-            let _guard = ctx.append(x.clone(), Rc::new(Value::Var(x.clone())));
-            Box::new(CapAvoidTerm::Lam(x.clone(), qoute(&evaluate(&ctx, z))))
+            let fresh = UniqueName::new(x.0.as_ref());
+            let _guard = ctx.append(x.clone(), Rc::new(Value::Var(fresh.clone())));
+            Box::new(CapAvoidTerm::Lam(fresh, qoute(&evaluate(&ctx, z))))
         }
     }
 }
 
 fn main() {
     let src = r#"
-        λ z . λ s . (let add2 = λ a . (s (s a)) in (
-            let two = (add2 z) in (
-                let four = (add2 two) in (
-                    add2 four
+        (let I = λ x . x in (
+            let K = λ x . λ y . x in (
+                let S = λ x . λ y . λ z . ((x z) (y z)) in (
+                    ((S I) I) S
                 )
             )
         ))
