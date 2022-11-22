@@ -6,5 +6,6 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-pest = "2.4.1"
+pest = { version = "2.4.1" }
+pest_derive = { version = "2.4.1" }
 clap = "4.0.26"
