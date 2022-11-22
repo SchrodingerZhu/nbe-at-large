@@ -53,8 +53,7 @@ impl Env {
 
 fn eval(env: Rc<Env>, term: &Term) -> Rc<Value> {
     match term {
-        Term::Var(x) => env
-            .lookup(x).unwrap(),
+        Term::Var(x) => env.lookup(x).unwrap(),
         Term::Lam(x, t) => {
             let t = t.clone();
             let name = x.clone();
