@@ -176,7 +176,7 @@ enum Value<'a> {
 }
 
 struct Context<'a>(std::cell::UnsafeCell<std::collections::HashMap<UniqueName, Rc<Value<'a>>>>);
-struct Guard<'a, 'b>(&'b Context<'a>, Vec<(UniqueName, Option<Rc<Value<'a>>>)>);
+struct Guard<'a, 'b>(&'b Context<'a>, Vec<UniqueName>);
 
 impl<'a> Context<'a> {
     fn new() -> Self {
@@ -196,35 +196,26 @@ impl<'a> Context<'a> {
         }
     }
 
-    fn append_closure<'b, I>(&'b self, i: I) -> Guard<'a, 'b>
+    fn from_closure<'b, I>(i: I) -> Context<'a>
     where
         I: Iterator<Item = &'b (UniqueName, Rc<Value<'a>>)>,
+        'a : 'b
     {
-        let map = unsafe { &mut *self.0.get() };
-        let mut v = Vec::new();
-        for i in i {
-            let x = map.insert(i.0.clone(), i.1.clone());
-            v.push((i.0.clone(), x));
-        }
-        Guard(self, v)
+        Context(std::cell::UnsafeCell::new(i.map(|x|(x.0.clone(), x.1.clone())).collect()))
     }
 
     fn append<'b>(&'b self, name: UniqueName, value: Rc<Value<'a>>) -> Guard<'a, 'b> {
         let map = unsafe { &mut *self.0.get() };
-        let x = map.insert(name.clone(), value.clone());
-        Guard(self, vec![(name, x)])
+        map.insert(name.clone(), value.clone());
+        Guard(self, vec![name])
     }
 }
 
 impl<'a, 'b> Drop for Guard<'a, 'b> {
     fn drop(&mut self) {
         let map = unsafe { &mut *self.0 .0.get() };
-        for (name, value) in self.1.iter().cloned() {
-            if let Some(v) = value {
-                map.insert(name, v);
-            } else {
-                map.remove(&name);
-            }
+        for name in self.1.iter() {
+            map.remove(name);
         }
     }
 }
@@ -244,9 +235,9 @@ where
             let rhs = evaluate(ctx, rhs);
             match lhs.as_ref() {
                 Value::Lam(x, closure, body) => {
-                    let _guard1 = ctx.append_closure(closure.iter());
-                    let _guard2 = ctx.append(x.clone(), rhs);
-                    evaluate(ctx, body)
+                    let ctx = Context::from_closure(closure.iter());
+                    let _guard = ctx.append(x.clone(), rhs);
+                    evaluate(&ctx, body)
                 }
                 _ => Rc::new(Value::App(lhs, rhs)),
             }
@@ -273,9 +264,8 @@ fn qoute(val: &Value) -> Box<CapAvoidTerm> {
             Box::new(CapAvoidTerm::App(lhs, rhs))
         }
         Value::Lam(x, y, z) => {
-            let ctx = Context::new();
-            let _guard1 = ctx.append_closure(y.iter());
-            let _guard2 = ctx.append(x.clone(), Rc::new(Value::Var(x.clone())));
+            let ctx = Context::from_closure(y.iter());
+            let _guard = ctx.append(x.clone(), Rc::new(Value::Var(x.clone())));
             Box::new(CapAvoidTerm::Lam(x.clone(), qoute(&evaluate(&ctx, z))))
         }
     }
