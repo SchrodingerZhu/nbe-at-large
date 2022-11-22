@@ -159,8 +159,27 @@ fn translate(x: Pair<Rule>) -> Rc<Term> {
     }
 }
 
+impl std::fmt::Display for Term {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Term::Var(x) => write!(f, "{}", x),
+            Term::Lam(x, y) => write!(f, "λ {} . {}", x , y),
+            Term::App(x, y) => write!(f, "({} {})", x , y),
+            Term::Let(x, y, z) => write!(f, "(let {} = {} in {})", x, y, z),
+        }
+    }
+}
+
 fn main() {
-    let src = "λ x . (let x = λ y . y in λ x . x x)";
+    let src = r#"
+        λ z . λ s . (let add2 = λ a . (s (s a)) in (
+            let two = (add2 z) in (
+                let four = (add2 two) in (
+                    add2 four
+                ) 
+            )
+        ))
+    "#;
     let parser = LambdaParser::parse(Rule::file, src)
         .unwrap()
         .next()
@@ -174,8 +193,8 @@ fn main() {
         .next()
         .unwrap();
     let expr = translate(t);
-    println!("{:?}", expr);
+    println!("{}", expr);
     let expr = eval(Rc::new(Env::Nil), &expr);
     let expr = quote(Rc::new(NameList::Nil), expr.as_ref());
-    println!("{:?}", expr);
+    println!("{}", expr);
 }
