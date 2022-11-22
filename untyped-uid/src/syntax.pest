@@ -1,0 +1,7 @@
+file = { SOI ~ expr ~ EOI }
+expr = { var | let_expr | lambda_expr | app_expr }
+var = @{ !("let") ~ ('a'..'z' | 'A'..'Z' | '0'..'9')+ }
+let_expr = {"(" ~ "let" ~ var ~ "=" ~ expr ~ "in" ~ expr ~ ")"}
+lambda_expr = { "λ" ~ var ~ "." ~ expr }
+app_expr = { "(" ~ expr ~ expr ~ ")" }
+WHITESPACE = _{ WHITE_SPACE }

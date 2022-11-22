@@ -163,8 +163,8 @@ impl std::fmt::Display for Term {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Term::Var(x) => write!(f, "{}", x),
-            Term::Lam(x, y) => write!(f, "λ {} . {}", x , y),
-            Term::App(x, y) => write!(f, "({} {})", x , y),
+            Term::Lam(x, y) => write!(f, "λ {} . {}", x, y),
+            Term::App(x, y) => write!(f, "({} {})", x, y),
             Term::Let(x, y, z) => write!(f, "(let {} = {} in {})", x, y, z),
         }
     }
