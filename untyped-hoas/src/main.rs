@@ -54,8 +54,7 @@ impl Env {
 fn eval(env: Rc<Env>, term: &Term) -> Rc<Value> {
     match term {
         Term::Var(x) => env
-            .lookup(x)
-            .unwrap_or_else(|| Rc::new(Value::Var(x.clone()))),
+            .lookup(x).unwrap(),
         Term::Lam(x, t) => {
             let t = t.clone();
             let name = x.clone();
@@ -162,7 +161,7 @@ fn translate(x: Pair<Rule>) -> Rc<Term> {
 }
 
 fn main() {
-    let src = "(let x = λ y . y in λ x . x x)";
+    let src = "λ x . (let x = λ y . y in λ x . x x)";
     let parser = LambdaParser::parse(Rule::file, src)
         .unwrap()
         .next()
