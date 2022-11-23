@@ -11,7 +11,6 @@ pub enum ParseTree<'a> {
         name: &'a str,
         annotation: Option<Box<Self>>,
     },
-    Underscope(&'a str),
 
     TypeLit(&'a str),
     Type {
