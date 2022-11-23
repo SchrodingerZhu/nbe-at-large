@@ -1,7 +1,7 @@
 use logos::Logos;
 
-#[derive(Logos, Debug, PartialEq)]
-enum Token {
+#[derive(Logos, Debug, PartialEq, Clone, Copy)]
+pub enum Token {
     #[token("module")]
     Module,
 

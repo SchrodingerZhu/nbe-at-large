@@ -8,3 +8,5 @@ edition = "2021"
 [dependencies]
 logos = "0.12.1"
 pratt = "0.4.0"
+error-stack = { version = "0.2.4", features = ["eyre", "std", "pretty-print", "spantrace"] }
+thiserror = "1.0"
