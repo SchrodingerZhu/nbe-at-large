@@ -78,7 +78,7 @@ enum Token {
     BigCase,
 
     #[token("_")]
-    Underline,
+    Underscope,
 
     #[token("let")]
     Let,
