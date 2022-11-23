@@ -1,5 +1,6 @@
 [workspace]
 members = [
 	"untyped-hoas",
-	"untyped-uid"
+	"untyped-uid",
+	"syntax"
 ]
