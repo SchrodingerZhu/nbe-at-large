@@ -21,6 +21,7 @@ pub enum ParseTree<'a> {
         definitions: Vec<Box<Self>>,
     },
 
+    Underscore,
     Variable {
         name: Box<Self>,
         annotation: Option<Box<Self>>,
@@ -378,13 +379,13 @@ mod implementation {
             .delimited_by(consume_lsquare(), consume_rsquare())
             .or(annotated().delimited_by(consume_lsquare(), consume_rsquare()));
 
-        explicit.or(implicit)
+        explicit.or(implicit).or(just(Token::Underscore).to(Box::new(Underscore)))
     }
 
     #[test]
     fn module() {
         let src = "
-            lambda (x : (n : Nat) -> Fin (succ n)) . let (y : Nat) = (add (succ z) (succ z)) in (x y)
+            case x of { M a b _ -> a; }
         ";
         let steam = LexerStream::chumsky_stream(src);
         let parsed = parse_expr().parse(steam);

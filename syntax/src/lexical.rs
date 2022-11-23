@@ -66,7 +66,7 @@ pub enum Token {
     BigCase,
 
     #[token("_")]
-    Underscope,
+    Underscore,
 
     #[token("let")]
     Let,
