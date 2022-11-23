@@ -77,6 +77,15 @@ enum Token {
     #[regex("[A-Z]+[0-9a-zA-Z']*")]
     BigCase,
 
+    #[token("_")]
+    Underline,
+
+    #[token("let")]
+    Let,
+
+    #[token("in")]
+    In,
+
     // Logos requires one token variant to handle errors,
     // it can be named anything you wish.
     #[error]
