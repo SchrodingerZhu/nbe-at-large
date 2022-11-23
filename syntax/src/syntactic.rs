@@ -327,7 +327,7 @@ mod implementation {
     {
         let consume_let = just(Token::Let);
         let consume_equal = just(Token::Equal);
-        let consume_in = just(Token::Equal);
+        let consume_in = just(Token::In);
         consume_let
             .ignore_then(parse_variable(expr.clone()))
             .then_ignore(consume_equal)
@@ -383,7 +383,9 @@ mod implementation {
 
     #[test]
     fn module() {
-        let src = "lambda (x : Nat) . (succ x)";
+        let src = "
+            lambda (x : (n : Nat) -> Fin (succ n)) . let (y : Nat) = (add (succ z) (succ z)) in (x y)
+        ";
         let steam = LexerStream::chumsky_stream(src);
         let parsed = parse_expr().parse(steam);
         println!("{:?}", parsed);
