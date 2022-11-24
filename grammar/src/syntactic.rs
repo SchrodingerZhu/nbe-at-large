@@ -1,4 +1,4 @@
-use chumsky::error::Simple;
+use chumsky::{error::Simple, Parser};
 
 use crate::lexical::{SrcSpan, Token};
 
@@ -33,10 +33,13 @@ pub enum ParseTree<'a> {
         lhs: Box<Self>,
         rhs: Box<Self>,
     },
-    // can be telescope, type lit, or type
     TypeDecl {
+        former: Box<Self>,
+        constructors: Vec<Box<Self>>,
+    },
+    TypeFormer {
         name: Box<Self>,
-        contructors: Vec<Box<Self>>,
+        params: Vec<Box<Self>>,
     },
     Constructor {
         name: Box<Self>,
@@ -85,11 +88,57 @@ pub enum ParseTree<'a> {
 
 pub type ParserError<'src> = Simple<Token, SrcSpan<'src>>;
 
+pub fn parse<'a>(src: &'a str) -> (Option<Box<ParseTree<'a>>>, Vec<ParserError<'a>>) {
+    let stream = crate::lexical::LexerStream::chumsky_stream(src.as_ref());
+    implementation::parse_module().parse_recovery_verbose(stream)
+}
+
 mod implementation {
     use chumsky::prelude::*;
     use ParseTree::*;
 
     use super::*;
+
+    pub(crate) fn parse_module<'a>(
+    ) -> impl Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>> {
+        let consume_module = just(Token::Module);
+        let name = parse_literal(Token::BigCase);
+        let expr = parse_expr().boxed();
+        let r#type = parse_type(expr.clone()).boxed();
+        consume_module
+            .ignore_then(name)
+            .then(parse_definitions(expr, r#type))
+            .then_ignore(end())
+            .map(|(name, definitions)| Box::new(Module { name, definitions }))
+    }
+
+    fn parse_function_decl<'a, T>(
+        r#type: T,
+    ) -> impl Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>>
+    where
+        T: Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>> + 'a,
+    {
+        let name = parse_literal(Token::SmallCase);
+        let consume_colon = just(Token::Colon);
+        name.then_ignore(consume_colon)
+            .then(r#type)
+            .map(|(name, r#type)| Box::new(FuncDecl { name, r#type }))
+    }
+
+    fn parse_function_def<'a, T>(
+        expr: T,
+    ) -> impl Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>>
+    where
+        T: Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>> + Clone + 'a,
+    {
+        let name = parse_literal(Token::SmallCase);
+        let params = parse_variable(expr.clone()).repeated();
+        let consume_equal = just(Token::Equal);
+        name.then(params)
+            .then_ignore(consume_equal)
+            .then(expr)
+            .map(|((name, params), body)| Box::new(FuncDefine { name, params, body }))
+    }
 
     fn parse_literal<'a>(
         token: Token,
@@ -97,9 +146,79 @@ mod implementation {
         just(token).map_with_span(|_, span: SrcSpan<'a>| Box::new(Literal(span.slice())))
     }
 
-    fn parse_definitions<'a>(
-    ) -> impl Parser<Token, Vec<Box<ParseTree<'a>>>, Error = ParserError<'a>> {
-        parse_import().repeated()
+    fn parse_definitions<'a, E, T>(
+        expr: E,
+        r#type: T,
+    ) -> impl Parser<Token, Vec<Box<ParseTree<'a>>>, Error = ParserError<'a>>
+    where
+        E: Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>> + Clone + 'a,
+        T: Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>> + Clone + 'a,
+    {
+        parse_import()
+            .or(parse_type_decl(r#type.clone()))
+            .or(parse_function_decl(r#type))
+            .or(parse_function_def(expr))
+            .repeated()
+    }
+
+    // data List (a : Type) = {
+    //      Nil : List a;
+    //      Cons : a -> List;
+    // }
+    fn parse_type_former<'a, T>(
+        r#type: T,
+    ) -> impl Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>>
+    where
+        T: Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>> + Clone + 'a,
+    {
+        let consume_data = just(Token::Data);
+        let name = parse_literal(Token::BigCase);
+        let telescopes = parse_telescope(true, r#type.clone())
+            .or(parse_telescope(false, r#type.clone()))
+            .repeated();
+        consume_data
+            .ignore_then(name)
+            .then(telescopes)
+            .map(|(name, params)| Box::new(TypeFormer { name, params }))
+    }
+
+    fn parse_constructor<'a, T>(
+        r#type: T,
+    ) -> impl Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>>
+    where
+        T: Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>> + Clone + 'a,
+    {
+        let name = parse_literal(Token::BigCase);
+        let consume_colon = just(Token::Colon);
+        let consume_semicolon = just(Token::SemiColon);
+        name.then_ignore(consume_colon)
+            .then(r#type)
+            .then_ignore(consume_semicolon)
+            .map(|(name, r#type)| Box::new(Constructor { name, r#type }))
+    }
+
+    fn parse_type_decl<'a, T>(
+        r#type: T,
+    ) -> impl Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>>
+    where
+        T: Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>> + Clone + 'a,
+    {
+        let former = parse_type_former(r#type.clone());
+        let consume_equal = just(Token::Equal);
+        let consume_lbrace = just(Token::LBrace);
+        let constructors = parse_constructor(r#type).repeated();
+        let consume_rbrace = just(Token::RBrace);
+        former
+            .then_ignore(consume_equal)
+            .then_ignore(consume_lbrace)
+            .then(constructors)
+            .then_ignore(consume_rbrace)
+            .map(|(former, constructors)| {
+                Box::new(TypeDecl {
+                    former,
+                    constructors,
+                })
+            })
     }
 
     fn parse_import<'a>() -> impl Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>> {
@@ -108,15 +227,6 @@ mod implementation {
         consume_import
             .ignore_then(name)
             .map(|name| Box::new(Import(name)))
-    }
-
-    fn parse_module<'a>() -> impl Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>> {
-        let consume_module = just(Token::Module);
-        let name = parse_literal(Token::BigCase);
-        consume_module
-            .ignore_then(name)
-            .then(parse_definitions())
-            .map(|(name, definitions)| Box::new(Module { name, definitions }))
     }
 
     // "Type"
@@ -135,15 +245,27 @@ mod implementation {
         })
     }
 
+    fn parse_type_variable<'a>() -> impl Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>>
+    {
+        let name = parse_literal(Token::SmallCase);
+        name.map(|name| {
+            Box::new(Variable {
+                name,
+                annotation: None,
+            })
+        })
+    }
+
     fn parse_simple_type_expr<'a, E, T>(
         expr: E,
         r#type: T,
     ) -> impl Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>>
     where
         T: Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>> + Clone,
-        E: Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>>,
+        E: Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>> + 'a,
     {
         parse_type_expr(expr)
+            .or(parse_type_variable())
             .or(parse_telescope(true, r#type.clone()))
             .or(parse_telescope(false, r#type))
     }
@@ -154,7 +276,7 @@ mod implementation {
     ) -> impl Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>>
     where
         T: Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>> + Clone + 'a,
-        E: Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>> + 'a,
+        E: Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>> + Clone + 'a,
     {
         recursive(|arrow| {
             let primitive = parse_simple_type_expr(expr, r#type);
@@ -346,15 +468,15 @@ mod implementation {
         let annotation = || parse_type(expr.clone());
 
         let unannotated = || {
-            (parse_literal(Token::SmallCase).map(|name| {
+            parse_literal(Token::SmallCase).map(|name| {
                 Box::new(Variable {
                     name,
                     annotation: None,
                 })
-            }))
+            })
         };
         let annotated = || {
-            (parse_literal(Token::SmallCase)
+            parse_literal(Token::SmallCase)
                 .then_ignore(consume_colon())
                 .then(annotation())
                 .map(|(name, annotation)| {
@@ -362,7 +484,7 @@ mod implementation {
                         name,
                         annotation: Some(annotation),
                     })
-                }))
+                })
         };
 
         let explicit =
@@ -378,12 +500,44 @@ mod implementation {
     }
 
     #[test]
-    fn module() {
+    fn test_data() {
         let src = "
-            case x of { M a b _ -> a; }
+            module Test
+            import Primitive
+            data List (a : Type) = {
+                Nil : List a;
+                Cons : a -> List a -> List a;
+            }
         ";
         let steam = crate::lexical::LexerStream::chumsky_stream(src);
-        let parsed = parse_expr().parse(steam);
-        println!("{:?}", parsed);
+        let parsed = parse_module().parse(steam);
+        println!("{:?}", parsed.unwrap());
+    }
+
+    #[test]
+    fn test_func_decl() {
+        let src = "
+            module Test
+            import Primitive
+            map : [a : Type] -> [b : Type] -> (a -> b) -> List a -> List b
+        ";
+        let steam = crate::lexical::LexerStream::chumsky_stream(src);
+        let parsed = parse_module().parse(steam);
+        println!("{:?}", parsed.unwrap());
+    }
+
+    #[test]
+    fn test_func_def() {
+        let src = "
+            module Test
+            import Primitive
+            map f list = case list of {
+                Nil -> Nil;
+                Cons head tail -> Cons (f head) (map f tail);
+            }
+        ";
+        let stream = crate::lexical::LexerStream::chumsky_stream(src);
+        let parsed = parse_module().parse(stream);
+        println!("{:?}", parsed.unwrap());
     }
 }
