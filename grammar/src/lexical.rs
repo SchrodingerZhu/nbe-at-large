@@ -81,7 +81,7 @@ pub enum Token {
     // We can also use this variant to define whitespace,
     // or any other matches we wish to skip.
     #[regex(r"[ \t\n\f\r]+", logos::skip)]
-    _Slience,
+    _Silence,
 }
 
 #[derive(Clone, Debug, PartialEq)]
