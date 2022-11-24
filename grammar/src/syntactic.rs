@@ -99,8 +99,14 @@ mod implementation {
 
     use super::*;
 
-    pub(crate) fn parse_module<'a>(
-    ) -> impl Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>> {
+    pub(crate) trait MyParser<'a, O = Box<ParseTree<'a>>>:
+        Parser<Token, O, Error = ParserError<'a>>
+    {
+    }
+
+    impl<'a, O, T> MyParser<'a, O> for T where T: Parser<Token, O, Error = ParserError<'a>> {}
+
+    pub(crate) fn parse_module<'a>() -> impl MyParser<'a> {
         let consume_module = just(Token::Module);
         let name = parse_literal(Token::BigCase);
         let expr = parse_expr().boxed();
@@ -112,11 +118,9 @@ mod implementation {
             .map(|(name, definitions)| Box::new(Module { name, definitions }))
     }
 
-    fn parse_function_decl<'a, T>(
-        r#type: T,
-    ) -> impl Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>>
+    fn parse_function_decl<'a, T>(r#type: T) -> impl MyParser<'a>
     where
-        T: Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>> + 'a,
+        T: MyParser<'a> + 'a,
     {
         let name = parse_literal(Token::SmallCase);
         let consume_colon = just(Token::Colon);
@@ -125,11 +129,9 @@ mod implementation {
             .map(|(name, r#type)| Box::new(FuncDecl { name, r#type }))
     }
 
-    fn parse_function_def<'a, T>(
-        expr: T,
-    ) -> impl Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>>
+    fn parse_function_def<'a, T>(expr: T) -> impl MyParser<'a>
     where
-        T: Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>> + Clone + 'a,
+        T: MyParser<'a> + Clone + 'a,
     {
         let name = parse_literal(Token::SmallCase);
         let params = parse_variable(expr.clone()).repeated();
@@ -140,19 +142,14 @@ mod implementation {
             .map(|((name, params), body)| Box::new(FuncDefine { name, params, body }))
     }
 
-    fn parse_literal<'a>(
-        token: Token,
-    ) -> impl Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>> {
+    fn parse_literal<'a>(token: Token) -> impl MyParser<'a> {
         just(token).map_with_span(|_, span: SrcSpan<'a>| Box::new(Literal(span.slice())))
     }
 
-    fn parse_definitions<'a, E, T>(
-        expr: E,
-        r#type: T,
-    ) -> impl Parser<Token, Vec<Box<ParseTree<'a>>>, Error = ParserError<'a>>
+    fn parse_definitions<'a, E, T>(expr: E, r#type: T) -> impl MyParser<'a, Vec<Box<ParseTree<'a>>>>
     where
-        E: Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>> + Clone + 'a,
-        T: Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>> + Clone + 'a,
+        E: MyParser<'a> + Clone + 'a,
+        T: MyParser<'a> + Clone + 'a,
     {
         parse_import()
             .or(parse_type_decl(r#type.clone()))
@@ -165,11 +162,9 @@ mod implementation {
     //      Nil : List a;
     //      Cons : a -> List;
     // }
-    fn parse_type_former<'a, T>(
-        r#type: T,
-    ) -> impl Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>>
+    fn parse_type_former<'a, T>(r#type: T) -> impl MyParser<'a>
     where
-        T: Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>> + Clone + 'a,
+        T: MyParser<'a> + Clone + 'a,
     {
         let consume_data = just(Token::Data);
         let name = parse_literal(Token::BigCase);
@@ -182,11 +177,9 @@ mod implementation {
             .map(|(name, params)| Box::new(TypeFormer { name, params }))
     }
 
-    fn parse_constructor<'a, T>(
-        r#type: T,
-    ) -> impl Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>>
+    fn parse_constructor<'a, T>(r#type: T) -> impl MyParser<'a>
     where
-        T: Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>> + Clone + 'a,
+        T: MyParser<'a> + Clone + 'a,
     {
         let name = parse_literal(Token::BigCase);
         let consume_colon = just(Token::Colon);
@@ -197,11 +190,9 @@ mod implementation {
             .map(|(name, r#type)| Box::new(Constructor { name, r#type }))
     }
 
-    fn parse_type_decl<'a, T>(
-        r#type: T,
-    ) -> impl Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>>
+    fn parse_type_decl<'a, T>(r#type: T) -> impl MyParser<'a>
     where
-        T: Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>> + Clone + 'a,
+        T: MyParser<'a> + Clone + 'a,
     {
         let former = parse_type_former(r#type.clone());
         let consume_equal = just(Token::Equal);
@@ -221,7 +212,7 @@ mod implementation {
             })
     }
 
-    fn parse_import<'a>() -> impl Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>> {
+    fn parse_import<'a>() -> impl MyParser<'a> {
         let consume_import = just(Token::Import);
         let name = parse_literal(Token::BigCase);
         consume_import
@@ -233,9 +224,9 @@ mod implementation {
     // Arrow
     // "type expr"
 
-    fn parse_type<'a, E>(expr: E) -> impl Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>>
+    fn parse_type<'a, E>(expr: E) -> impl MyParser<'a>
     where
-        E: Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>> + Clone + 'a,
+        E: MyParser<'a> + Clone + 'a,
     {
         let type_literal = just(Token::Type).to(Box::new(Type));
         recursive(move |r#type| {
@@ -245,8 +236,7 @@ mod implementation {
         })
     }
 
-    fn parse_type_variable<'a>() -> impl Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>>
-    {
+    fn parse_type_variable<'a>() -> impl MyParser<'a> {
         let name = parse_literal(Token::SmallCase);
         name.map(|name| {
             Box::new(Variable {
@@ -256,13 +246,10 @@ mod implementation {
         })
     }
 
-    fn parse_simple_type_expr<'a, E, T>(
-        expr: E,
-        r#type: T,
-    ) -> impl Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>>
+    fn parse_simple_type_expr<'a, E, T>(expr: E, r#type: T) -> impl MyParser<'a>
     where
-        T: Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>> + Clone,
-        E: Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>> + 'a,
+        T: MyParser<'a> + Clone,
+        E: MyParser<'a> + 'a,
     {
         parse_type_expr(expr)
             .or(parse_type_variable())
@@ -270,13 +257,10 @@ mod implementation {
             .or(parse_telescope(false, r#type))
     }
 
-    fn parse_arrow_expr<'a, E, T>(
-        expr: E,
-        r#type: T,
-    ) -> impl Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>>
+    fn parse_arrow_expr<'a, E, T>(expr: E, r#type: T) -> impl MyParser<'a>
     where
-        T: Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>> + Clone + 'a,
-        E: Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>> + Clone + 'a,
+        T: MyParser<'a> + Clone + 'a,
+        E: MyParser<'a> + Clone + 'a,
     {
         recursive(|arrow| {
             let primitive = parse_simple_type_expr(expr, r#type);
@@ -297,11 +281,9 @@ mod implementation {
         })
     }
 
-    fn parse_type_expr<'a, E>(
-        expr: E,
-    ) -> impl Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>>
+    fn parse_type_expr<'a, E>(expr: E) -> impl MyParser<'a>
     where
-        E: Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>>,
+        E: MyParser<'a>,
     {
         let name = parse_literal(Token::BigCase);
         let params = expr.repeated();
@@ -309,12 +291,9 @@ mod implementation {
             .map(|(name, params)| Box::new(TypeExpr { name, params }))
     }
 
-    fn parse_telescope<'a, P>(
-        implicit: bool,
-        r#type: P,
-    ) -> impl Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>>
+    fn parse_telescope<'a, P>(implicit: bool, r#type: P) -> impl MyParser<'a>
     where
-        P: Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>>,
+        P: MyParser<'a>,
     {
         let consume_lparen = just(if implicit {
             Token::LSquare
@@ -343,7 +322,7 @@ mod implementation {
             })
     }
 
-    fn parse_expr<'a>() -> impl Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>> {
+    fn parse_expr<'a>() -> impl MyParser<'a> {
         // variable
         // function/constructor apply
         // lambda
@@ -359,11 +338,9 @@ mod implementation {
         })
     }
 
-    fn parse_pattern_match<'a, P>(
-        expr: P,
-    ) -> impl Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>>
+    fn parse_pattern_match<'a, P>(expr: P) -> impl MyParser<'a>
     where
-        P: Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>> + Clone + 'a,
+        P: MyParser<'a> + Clone + 'a,
     {
         let consume_case = just(Token::Case);
         let consume_of = just(Token::Of);
@@ -379,11 +356,9 @@ mod implementation {
             .map(|(expr, rules)| Box::new(PatternMatch { expr, rules }))
     }
 
-    fn parse_pattern_rule<'a, P>(
-        expr: P,
-    ) -> impl Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>>
+    fn parse_pattern_rule<'a, P>(expr: P) -> impl MyParser<'a>
     where
-        P: Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>> + Clone + 'a,
+        P: MyParser<'a> + Clone + 'a,
     {
         let constructor = parse_literal(Token::BigCase);
         let variables = parse_variable(expr.clone()).repeated();
@@ -403,11 +378,9 @@ mod implementation {
             })
     }
 
-    fn parse_lambda<'a, P>(
-        expr: P,
-    ) -> impl Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>>
+    fn parse_lambda<'a, P>(expr: P) -> impl MyParser<'a>
     where
-        P: Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>> + Clone + 'a,
+        P: MyParser<'a> + Clone + 'a,
     {
         let consume_lambda = just(Token::Lambda);
         let variables = parse_variable(expr.clone()).repeated();
@@ -420,11 +393,9 @@ mod implementation {
     }
 
     // (func x x x)
-    fn parse_function_apply<'a, P>(
-        expr: P,
-    ) -> impl Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>>
+    fn parse_function_apply<'a, P>(expr: P) -> impl MyParser<'a>
     where
-        P: Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>> + Clone,
+        P: MyParser<'a> + Clone,
     {
         let consume_lparen = just(Token::LParen);
         let consume_rparen = just(Token::RParen);
@@ -435,11 +406,9 @@ mod implementation {
             .map(|(func, args)| Box::new(FuncApply { func, args }))
     }
 
-    fn parse_let_in_expr<'a, P>(
-        expr: P,
-    ) -> impl Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>>
+    fn parse_let_in_expr<'a, P>(expr: P) -> impl MyParser<'a>
     where
-        P: Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>> + Clone + 'a,
+        P: MyParser<'a> + Clone + 'a,
     {
         let consume_let = just(Token::Let);
         let consume_equal = just(Token::Equal);
@@ -453,11 +422,9 @@ mod implementation {
             .map(|((var, binding), body)| Box::new(Let { var, binding, body }))
     }
 
-    fn parse_variable<'a, P>(
-        expr: P,
-    ) -> impl Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>>
+    fn parse_variable<'a, P>(expr: P) -> impl MyParser<'a>
     where
-        P: Parser<Token, Box<ParseTree<'a>>, Error = ParserError<'a>> + Clone + 'a,
+        P: MyParser<'a> + Clone + 'a,
     {
         let consume_lparen = || just(Token::LParen);
         let consume_lsquare = || just(Token::LSquare);
