@@ -1,5 +1,5 @@
 [package]
-name = "syntax"
+name = "grammar"
 version = "0.1.0"
 edition = "2021"
 
@@ -7,7 +7,4 @@ edition = "2021"
 
 [dependencies]
 logos = "0.12.1"
-pratt = "0.4.0"
-error-stack = { version = "0.2.4", features = ["eyre", "std", "pretty-print", "spantrace"] }
-thiserror = "1.0"
 chumsky = { git  = "https://github.com/zesterer/chumsky", features = ["ahash", "std", "spill-stack", "nightly"] }

@@ -1,13 +1,6 @@
-use std::fmt::{format, Debug, Display};
+use chumsky::error::Simple;
 
-use error_stack::Report;
-use logos::Source;
-
-use chumsky::{error::Simple, Parser};
-
-use crate::lexical::{LexerStream, SrcSpan, Token};
-
-type Span = std::ops::Range<usize>;
+use crate::lexical::{SrcSpan, Token};
 
 #[derive(Clone, Debug)]
 pub enum ParseTree<'a> {
@@ -379,7 +372,9 @@ mod implementation {
             .delimited_by(consume_lsquare(), consume_rsquare())
             .or(annotated().delimited_by(consume_lsquare(), consume_rsquare()));
 
-        explicit.or(implicit).or(just(Token::Underscore).to(Box::new(Underscore)))
+        explicit
+            .or(implicit)
+            .or(just(Token::Underscore).to(Box::new(Underscore)))
     }
 
     #[test]
@@ -387,7 +382,7 @@ mod implementation {
         let src = "
             case x of { M a b _ -> a; }
         ";
-        let steam = LexerStream::chumsky_stream(src);
+        let steam = crate::lexical::LexerStream::chumsky_stream(src);
         let parsed = parse_expr().parse(steam);
         println!("{:?}", parsed);
     }
