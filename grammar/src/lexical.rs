@@ -56,13 +56,13 @@ pub enum Token {
     #[token("=")]
     Equal,
 
-    #[regex("[a-z]+[0-9a-zA-Z']*")]
+    #[regex("[a-z][0-9a-zA-Z']*")]
     SmallCase,
 
     #[token("Type")]
     Type,
 
-    #[regex("[A-Z]+[0-9a-zA-Z']*")]
+    #[regex("[A-Z][0-9a-zA-Z']*")]
     BigCase,
 
     #[token("_")]
