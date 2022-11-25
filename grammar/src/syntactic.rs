@@ -109,11 +109,9 @@ mod implementation {
     pub(super) fn parse_module<'a>() -> impl Parse<'a> {
         let consume_module = just(Token::Module);
         let name = parse_literal(Token::BigCase);
-        let expr = parse_expr().boxed();
-        let r#type = parse_type(expr.clone()).boxed();
         consume_module
             .ignore_then(name)
-            .then(parse_definitions(expr, r#type))
+            .then(parse_definitions())
             .then_ignore(end())
             .map(|(name, definitions)| Box::new(Module { name, definitions }))
     }
@@ -140,14 +138,15 @@ mod implementation {
         just(token).map_with_span(|_, span: SrcSpan<'a>| Box::new(Literal(span.slice())))
     }
 
-    fn parse_definitions<'a>(
-        expr: impl Parse<'a>,
-        r#type: impl Parse<'a>,
-    ) -> impl Parse<'a, Vec<Box<ParseTree<'a>>>> {
+    fn parse_definitions<'a>() -> impl Parse<'a, Vec<Box<ParseTree<'a>>>> {
+        let r#type = || {
+            let expr = parse_expr();
+            parse_type(expr)
+        };
         parse_import()
-            .or(parse_type_decl(r#type.clone()))
-            .or(parse_function_decl(r#type))
-            .or(parse_function_def(expr))
+            .or(parse_type_decl(r#type()))
+            .or(parse_function_decl(r#type()))
+            .or(parse_function_def(parse_expr()))
             .repeated()
     }
 
