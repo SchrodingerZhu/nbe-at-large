@@ -19,7 +19,7 @@ impl<T> std::ops::Deref for RcPtr<T> {
     }
 }
 
-// RcPtr because we may want to substitude
+// RcPtr because we may want to substitute
 pub enum Term {
     Type,
     Variable(Name),
@@ -39,7 +39,7 @@ pub enum Term {
     BoolElim(RcPtr<Self>, RcPtr<Self>, RcPtr<Self>),
     SigmaType(RcPtr<Self>, Name, RcPtr<Self>),
     SigmaIntro(RcPtr<Self>, RcPtr<Self>),
-    SignaElim(Name, Name, RcPtr<Self>, RcPtr<Self>),
+    SigmaElim(Name, Name, RcPtr<Self>, RcPtr<Self>),
 }
 
 type Results<'a, T> = (
