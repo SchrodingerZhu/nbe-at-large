@@ -5,6 +5,8 @@
       <sourceFolder url="file://$MODULE_DIR$/untyped-hoas/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/untyped-uid/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/syntax/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/grammar/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/variants/revision-zero/src" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
     </content>
     <orderEntry type="inheritedJdk" />
