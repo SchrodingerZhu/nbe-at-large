@@ -1,5 +1,5 @@
 use grammar::syntactic::{ParseTree, Ptr};
-use std::rc::Rc;
+use std::{rc::Rc, collections::HashMap};
 
 #[derive(Clone, Debug)]
 #[repr(transparent)]
@@ -43,12 +43,44 @@ type Results<'a, T> = (
     Vec<ariadne::Report<(&'a str, std::ops::Range<usize>)>>,
 );
 
+struct SyntaxContext<'a> {
+    source_name: &'a str,
+    source: &'a str,
+    variables: HashMap<&'a str, Name>
+}
+
+impl<'a> SyntaxContext<'a> {
+    fn new(source_name: &'a str,
+            source: &'a str) -> Self {
+                Self {
+                    source_name,
+                    source,
+                    variables: HashMap::new()
+                }
+    }   
+    fn init_error(&self, offset: usize) -> ariadne::ReportBuilder<(&'a str, std::ops::Range<usize>)> 
+    {
+        ariadne::Report::build(ariadne::ReportKind::Error, self.source_name, offset)
+    } 
+    fn init_warning(&self, offset: usize) -> ariadne::ReportBuilder<(&'a str, std::ops::Range<usize>)> 
+    {
+        ariadne::Report::build(ariadne::ReportKind::Warning, self.source_name, offset)
+    } 
+}
+
 impl Term {
-    fn new_from_definition<'a>(tree: &Ptr<ParseTree<'_>>) -> Results<'a, RcPtr<Self>> {
+    fn new_from_definition<'a>(ctx: &mut SyntaxContext<'a>, tree: &Ptr<ParseTree<'_>>) -> Results<'a, RcPtr<Self>> {
+        use ariadne::*;
         match tree.data.as_ref() {
             ParseTree::Literal(_) => todo!(),
             ParseTree::Implicit(_) => todo!(),
-            ParseTree::Import(_) => todo!(),
+            ParseTree::Import(_) => {
+                let report = ctx.init_warning(tree.location.start)
+                    .with_message("unsupported feature")
+                    .with_label(Label::new((ctx.source_name, tree.location.clone())).with_color(Color::Yellow).with_message("import is not supported and will be ignored"))
+                    .finish();
+                (None, vec![report])
+            },
             ParseTree::Module { .. } => unreachable!(),
             ParseTree::Underscore => todo!(),
             ParseTree::Variable { name, annotation } => todo!(),
@@ -86,8 +118,9 @@ impl Term {
             ParseTree::Module { definitions, .. } => {
                 let mut report = Vec::new();
                 let mut translated = Vec::new();
+                let mut ctx = SyntaxContext::new(source_name, source);
                 for i in definitions {
-                    let mut inner = Term::new_from_definition(i);
+                    let mut inner = Term::new_from_definition(&mut ctx, i);
                     inner.0.map(|x| translated.push(x));
                     report.append(&mut inner.1);
                 }
@@ -108,5 +141,14 @@ trait Subst: Sized {
 
 #[test]
 fn test() {
-    let source = "1";
+    let source = r#"
+    module Test
+    import A
+    import B
+"#;
+    let parse_tree = grammar::syntactic::parse(source).0.unwrap();
+    let module = Term::new_from_module("source.txt", source, &parse_tree);
+    for i in module.1.iter() {
+        i.eprint(("source.txt", ariadne::Source::from(source))).unwrap();
+    }
 }
