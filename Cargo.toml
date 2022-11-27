@@ -2,5 +2,6 @@
 members = [
 	"untyped-hoas",
 	"untyped-uid",
-	"grammar"
+	"grammar",
+	"variants/revision-zero"
 ]
