@@ -28,7 +28,6 @@ impl<T> Ptr<T> {
 #[derive(Clone, Debug)]
 pub enum ParseTree<'a> {
     Literal(&'a str),
-    Implicit(Ptr<Self>),
 
     Import(Ptr<Self>),
 
@@ -41,9 +40,14 @@ pub enum ParseTree<'a> {
     TrustMe,
 
     Variable(Ptr<Self>),
-    Parameter {
+    AnnotableVariable {
+        // in let expr
         name: Ptr<Self>,
         annotation: Option<Ptr<Self>>,
+    },
+    Parameter {
+        name: Ptr<Self>,
+        implicit: bool,
     },
 
     Type,
@@ -54,6 +58,7 @@ pub enum ParseTree<'a> {
     Telescope {
         name: Ptr<Self>,
         annotation: Ptr<Self>,
+        implicit: bool,
     },
     Arrow {
         lhs: Ptr<Self>,
@@ -163,7 +168,7 @@ mod implementation {
 
     fn parse_function_def<'a>(expr: impl Parse<'a>) -> impl Parse<'a> {
         let name = parse_literal(Token::SmallCase);
-        let params = parse_parameter(expr.clone()).repeated();
+        let params = parse_parameter().repeated();
         let consume_equal = just(Token::Equal);
         name.then(params)
             .then_ignore(consume_equal)
@@ -323,14 +328,14 @@ mod implementation {
             .then(r#type)
             .then_ignore(consume_rparen)
             .map_with_span(move |(name, annotation), span| {
-                if implicit {
-                    Ptr::new(
-                        span.span.clone(),
-                        Implicit(Ptr::new(span.span, Telescope { name, annotation })),
-                    )
-                } else {
-                    Ptr::new(span.span, Telescope { name, annotation })
-                }
+                Ptr::new(
+                    span.span,
+                    Telescope {
+                        name,
+                        annotation,
+                        implicit,
+                    },
+                )
             })
     }
 
@@ -372,7 +377,9 @@ mod implementation {
 
     fn parse_pattern_rule<'a>(expr: impl Parse<'a>) -> impl Parse<'a> {
         let constructor = parse_literal(Token::BigCase);
-        let variables = parse_parameter(expr.clone()).repeated();
+        let underscore = just(Token::Underscore)
+            .map_with_span(|_, span: SrcSpan<'a>| Ptr::new(span.span, ParseTree::Underscore));
+        let variables = parse_variable().or(underscore).repeated();
         let consume_arrow = just(Token::Arrow);
         let consume_semicolon = just(Token::SemiColon);
         constructor
@@ -394,7 +401,7 @@ mod implementation {
 
     fn parse_lambda<'a>(expr: impl Parse<'a>) -> impl Parse<'a> {
         let consume_lambda = just(Token::Lambda);
-        let variables = parse_parameter(expr.clone()).repeated();
+        let variables = parse_parameter().repeated();
         let consume_dot = just(Token::Dot);
         consume_lambda
             .ignore_then(variables)
@@ -419,7 +426,7 @@ mod implementation {
         let consume_equal = just(Token::Equal);
         let consume_in = just(Token::In);
         consume_let
-            .ignore_then(parse_parameter(expr.clone()))
+            .ignore_then(parse_annotable_variable(expr.clone()))
             .then_ignore(consume_equal)
             .then(expr.clone())
             .then_ignore(consume_in)
@@ -429,49 +436,61 @@ mod implementation {
             })
     }
 
-    fn parse_parameter<'a>(expr: impl Parse<'a>) -> impl Parse<'a> {
-        let consume_lparen = just(Token::LParen);
-        let consume_lsquare = just(Token::LSquare);
-        let consume_rparen = just(Token::RParen);
-        let consume_rsquare = just(Token::RSquare);
+    fn parse_annotable_variable<'a>(expr: impl Parse<'a>) -> impl Parse<'a> {
         let consume_colon = just(Token::Colon);
-
-        let annotation = || parse_type(expr.clone());
-
-        let unannotated = || {
+        let annotated = parse_literal(Token::SmallCase)
+            .then_ignore(consume_colon)
+            .then(parse_type(expr))
+            .map_with_span(|(name, annotation), span| {
+                Ptr::new(
+                    span.span,
+                    AnnotableVariable {
+                        name,
+                        annotation: Some(annotation),
+                    },
+                )
+            });
+        let unannotated = {
             parse_literal(Token::SmallCase).map_with_span(|name, span| {
                 Ptr::new(
                     span.span,
-                    Parameter {
+                    AnnotableVariable {
                         name,
                         annotation: None,
                     },
                 )
             })
         };
-        let annotated = || {
-            parse_literal(Token::SmallCase)
-                .then_ignore(consume_colon)
-                .then(annotation())
-                .map_with_span(|(name, annotation), span| {
-                    Ptr::new(
-                        span.span,
-                        Parameter {
-                            name,
-                            annotation: Some(annotation),
-                        },
-                    )
-                })
-        };
+        annotated.or(unannotated)
+    }
 
-        let explicit = unannotated().or(annotated().delimited_by(consume_lparen, consume_rparen));
+    fn parse_parameter<'a>() -> impl Parse<'a> {
+        let consume_lsquare = just(Token::LSquare);
+        let consume_rsquare = just(Token::RSquare);
 
-        let implicit = unannotated()
-            .delimited_by(consume_lsquare, consume_rsquare)
-            .or(annotated().delimited_by(consume_lsquare, consume_rsquare));
+        let explicit = parse_literal(Token::SmallCase).map_with_span(|name, span| {
+            let data = Parameter {
+                name,
+                implicit: false,
+            };
+            Ptr::new(span.span, data)
+        });
 
-        explicit.or(implicit).or(just(Token::Underscore)
-            .map_with_span(|_, span: SrcSpan<'a>| Ptr::new(span.span, Underscore)))
+        let implicit = consume_lsquare
+            .ignore_then(parse_literal(Token::SmallCase))
+            .then_ignore(consume_rsquare)
+            .map_with_span(|name, span| {
+                let data = Parameter {
+                    name,
+                    implicit: true,
+                };
+                Ptr::new(span.span, data)
+            });
+
+        let underscore = just(Token::Underscore)
+            .map_with_span(|_, span: SrcSpan<'a>| Ptr::new(span.span, ParseTree::Underscore));
+
+        implicit.or(explicit).or(underscore)
     }
 
     #[test]
