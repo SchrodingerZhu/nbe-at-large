@@ -40,6 +40,7 @@ pub enum ParseTree<'a> {
     TrustMe,
 
     Variable(Ptr<Self>),
+    ConstructorRef(Ptr<Self>),
     AnnotableVariable {
         // in let expr
         name: Ptr<Self>,
@@ -123,7 +124,7 @@ impl<'a> ParseTree<'a> {
     pub fn get_literal(&self) -> &'a str {
         match self {
             ParseTree::Literal(x) => *x,
-            _ => unreachable!(),
+            _ => assert_unreachable!(),
         }
     }
 }
@@ -271,6 +272,13 @@ mod implementation {
         name.map_with_span(|name, span| Ptr::new(span.span, Variable(name)))
     }
 
+    fn parse_constructor_ref<'a>() -> impl Parse<'a> {
+        let consume_at = just(Token::At);
+        let name = parse_literal(Token::BigCase);
+        consume_at
+            .ignore_then(name.map_with_span(|name, span| Ptr::new(span.span, ConstructorRef(name))))
+    }
+
     fn parse_simple_type_expr<'a>(expr: impl Parse<'a>, r#type: impl Parse<'a>) -> impl Parse<'a> {
         parse_type_expr(expr)
             .or(parse_variable())
@@ -303,9 +311,19 @@ mod implementation {
 
     fn parse_type_expr<'a>(expr: impl Parse<'a>) -> impl Parse<'a> {
         let name = parse_literal(Token::BigCase);
-        let params = expr.repeated();
-        name.then(params)
-            .map_with_span(|(name, params), span| Ptr::new(span.span, TypeExpr { name, params }))
+        let params = expr
+            .repeated()
+            .delimited_by(just(Token::LAngle), just(Token::RAngle))
+            .or_not();
+        name.then(params).map_with_span(|(name, params), span| {
+            Ptr::new(
+                span.span,
+                TypeExpr {
+                    name,
+                    params: params.unwrap_or_else(Vec::new),
+                },
+            )
+        })
     }
 
     fn parse_telescope<'a>(implicit: bool, r#type: impl Parse<'a>) -> impl Parse<'a> {
@@ -352,6 +370,7 @@ mod implementation {
             let trustme = just(Token::TrustMe)
                 .map_with_span(|_, span: SrcSpan<'a>| Ptr::new(span.span, TrustMe));
             parse_variable()
+                .or(parse_constructor_ref())
                 .or(trustme)
                 .or(parse_function_apply(expr.clone()))
                 .or(parse_lambda(expr.clone()))
@@ -416,7 +435,7 @@ mod implementation {
         let consume_rparen = just(Token::RParen);
         consume_lparen
             .ignore_then(expr.clone())
-            .then(expr.repeated())
+            .then(expr.repeated().at_least(1))
             .then_ignore(consume_rparen)
             .map_with_span(|(func, args), span| Ptr::new(span.span, FuncApply { func, args }))
     }
@@ -513,7 +532,7 @@ mod implementation {
         let src = "
             module Test
             import Primitive
-            map : [a : Type] -> [b : Type] -> (a -> b) -> List a -> List b
+            map : [a : Type] -> [b : Type] -> (a -> b) -> List<a> -> List<b> -> A
         ";
         let steam = crate::lexical::LexerStream::chumsky_stream(src);
         let parsed = parse_module().parse(steam);
@@ -532,6 +551,18 @@ mod implementation {
         ";
         let stream = crate::lexical::LexerStream::chumsky_stream(src);
         let parsed = parse_module().parse(stream);
-        println!("{:?}", parsed.unwrap());
+        println!("{:#?}", parsed.unwrap());
+    }
+
+    #[test]
+    fn test_simple() {
+        let src = "
+            module Test
+            list = List<Nat>
+            test = lambda a b . (@Cons a b)
+        ";
+        let stream = crate::lexical::LexerStream::chumsky_stream(src);
+        let parsed = parse_module().parse(stream);
+        println!("{:#?}", parsed.unwrap());
     }
 }

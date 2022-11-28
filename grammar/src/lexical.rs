@@ -38,6 +38,12 @@ pub enum Token {
     #[token("]")]
     RSquare,
 
+    #[token("<")]
+    LAngle,
+
+    #[token(">")]
+    RAngle,
+
     #[token("(")]
     LParen,
 
@@ -76,6 +82,9 @@ pub enum Token {
 
     #[token("!!")]
     TrustMe,
+
+    #[token("@")]
+    At,
 
     // Logos requires one token variant to handle errors,
     // it can be named anything you wish.

@@ -3,8 +3,8 @@ use std::cell::UnsafeCell;
 use std::hash::{Hash, Hasher};
 use std::{collections::HashMap, rc::Rc};
 
+use crate::assert_unreachable;
 use grammar::syntactic::{ParseTree, Ptr};
-
 #[derive(Clone, Debug)]
 #[repr(transparent)]
 pub struct Name(Rc<String>);
@@ -61,7 +61,7 @@ pub enum Term {
     BoolIntro(bool),
     BoolElim(RcPtr<Self>, RcPtr<Self>, RcPtr<Self>),
     SigmaType(RcPtr<Self>, Name, RcPtr<Self>),
-    SigmaIntro(RcPtr<Self>, RcPtr<Self>),
+    SigmaIntro,
     SigmaElim(Name, Name, RcPtr<Self>, RcPtr<Self>),
 }
 
@@ -107,7 +107,7 @@ impl Defintion {
             ParseTree::FuncDefine { name, params, body } => {
                 todo!()
             }
-            _ => unreachable!(),
+            _ => assert_unreachable!(),
         }
     }
 
@@ -128,7 +128,7 @@ impl Defintion {
                 }
                 (Some(translated), report)
             }
-            _ => unreachable!(),
+            _ => assert_unreachable!(),
         }
     }
 }
@@ -227,7 +227,7 @@ impl Term {
                 (Some(Some(name)), reports)
             }
             ParseTree::Underscore => (Some(None), Vec::new()),
-            _ => unreachable!(),
+            _ => assert_unreachable!(),
         }
     }
 
@@ -235,13 +235,121 @@ impl Term {
         ctx: &SyntaxContext<'a>,
         tree: &Ptr<ParseTree<'a>>,
     ) -> Results<'a, RcPtr<Self>> {
-        (
-            Some(RcPtr {
-                location: tree.location.clone(),
-                data: Rc::new(Term::TrustMe),
-            }),
-            Vec::new(),
-        )
+        let location = tree.location.clone();
+        match tree.data.as_ref() {
+            ParseTree::Lambda { params, body } => Term::new_from_params_and_body(ctx, params, body),
+            ParseTree::ConstructorRef(name) => match name.get_literal() {
+                "Unit'" => (
+                    Some(RcPtr {
+                        location,
+                        data: Rc::new(Term::UnitIntro),
+                    }),
+                    vec![],
+                ),
+                "Pair" => (
+                    Some(RcPtr {
+                        location,
+                        data: Rc::new(Term::SigmaIntro),
+                    }),
+                    vec![],
+                ),
+                "True" => (
+                    Some(RcPtr {
+                        location,
+                        data: Rc::new(Term::BoolIntro(true)),
+                    }),
+                    vec![],
+                ),
+                "False" => (
+                    Some(RcPtr {
+                        location,
+                        data: Rc::new(Term::BoolIntro(false)),
+                    }),
+                    vec![],
+                ),
+                lit => {
+                    let report = ctx
+                        .init_error(location.start)
+                        .with_message("unsupported feature")
+                        .with_label(
+                            ariadne::Label::new((ctx.source_name, location.clone()))
+                                .with_color(Color::Red)
+                                .with_message(format!("custom construct {} is not supported", lit)),
+                        )
+                        .finish();
+                    (None, vec![report])
+                }
+            },
+            ParseTree::Variable(_) => Term::new_from_variable(ctx, tree),
+            ParseTree::FuncApply { func, args } => {
+                let (func, mut reports) = Term::new_from_expr(ctx, func);
+                let mut translated_args = Some(Vec::new());
+                for i in args.iter() {
+                    let (arg, mut arg_reports) = Term::new_from_expr(ctx, i);
+                    reports.append(&mut arg_reports);
+                    translated_args = translated_args.and_then(move |mut x| {
+                        arg.map(|arg| {
+                            x.push(arg);
+                            x
+                        })
+                    });
+                }
+                let apply = func
+                    .and_then(move |f| translated_args.map(move |args| (f, args)))
+                    .and_then(move |(f, args)| {
+                        let mut res = Some(f);
+                        for i in args.into_iter() {
+                            res = res.map(move |tree: RcPtr<Term>| RcPtr {
+                                location: tree.location.start..i.location.end,
+                                data: Rc::new(Term::App(tree, i)),
+                            });
+                        }
+                        res
+                    });
+                (apply, reports)
+            }
+            ParseTree::TrustMe => {
+                let term = RcPtr {
+                    location,
+                    data: Rc::new(Term::TrustMe),
+                };
+                (Some(term), vec![])
+            }
+            _ => assert_unreachable!(),
+        }
+    }
+
+    fn new_from_params_and_body<'a>(
+        ctx: &SyntaxContext<'a>,
+        params: &Vec<Ptr<ParseTree<'a>>>,
+        body: &Ptr<ParseTree<'a>>,
+    ) -> Results<'a, RcPtr<Self>> {
+        let mut guards = Vec::new();
+        let mut reports = Vec::new();
+        for i in params.iter().rev() {
+            let (name, mut report) = Term::new_from_parameter(ctx, i);
+            reports.append(&mut report);
+            if let Some(Some(name)) = name {
+                guards.push((i.location.clone(), Some(ctx.push_variable(name))));
+            } else {
+                guards.push((i.location.clone(), None));
+            }
+        }
+        let (expr, mut report) = Term::new_from_expr(ctx, body);
+        reports.append(&mut report);
+
+        if let Some(mut expr) = expr {
+            for mut i in guards.into_iter() {
+                let name = i.1.take().map(|x| x.0);
+                expr = RcPtr {
+                    location: i.0.start..expr.location.end,
+                    data: Rc::new(Term::Lam(name, expr)),
+                };
+            }
+            (Some(expr), reports)
+        } else {
+            (None, reports)
+        }
     }
 
     fn new_from_function_definition<'a>(
@@ -250,34 +358,9 @@ impl Term {
     ) -> Results<'a, RcPtr<Self>> {
         match tree.data.as_ref() {
             ParseTree::FuncDefine { params, body, .. } => {
-                let mut guards = Vec::new();
-                let mut reports = Vec::new();
-                for i in params.iter().rev() {
-                    let (name, mut report) = Term::new_from_parameter(ctx, i);
-                    reports.append(&mut report);
-                    if let Some(Some(name)) = name {
-                        guards.push((i.location.clone(), Some(ctx.push_variable(name))));
-                    } else {
-                        guards.push((i.location.clone(), None));
-                    }
-                }
-                let (expr, mut report) = Term::new_from_expr(ctx, body);
-                reports.append(&mut report);
-
-                if let Some(mut expr) = expr {
-                    for mut i in guards.into_iter() {
-                        let name = i.1.take().map(|x| x.0);
-                        expr = RcPtr {
-                            location: i.0.start..expr.location.end,
-                            data: Rc::new(Term::Lam(name, expr)),
-                        };
-                    }
-                    (Some(expr), reports)
-                } else {
-                    (None, reports)
-                }
+                Term::new_from_params_and_body(ctx, params, body)
             }
-            _ => unreachable!(),
+            _ => assert_unreachable!(),
         }
     }
 
@@ -316,7 +399,7 @@ impl Term {
                     (None, vec![unresolved_var(ctx, tree, name)])
                 }
             }
-            _ => unreachable!(),
+            _ => assert_unreachable!(),
         }
     }
 }
@@ -336,8 +419,8 @@ fn test() {
     import A
     import B
     data List (a : Type) = {
-        Nil : List a;
-        Cons : a -> List a -> List a;
+        Nil : List<a>;
+        Cons : a -> List<a> -> List<a>;
     }
 "#;
     let parse_tree = grammar::syntactic::parse(source).0.unwrap();
@@ -349,16 +432,13 @@ fn test() {
 }
 
 #[test]
-fn test_function_decl() {
+fn test_2() {
     let source = r#"
     module Test
-    fst x [y] = x
-    negate x = case x of {
-        True -> False;
-        False -> True;
-    }
-    
+    test x = lambda y . (@Pair x y) 
 "#;
+    let parse_tree = grammar::syntactic::parse(source).1;
+    eprintln!("{:#?}", parse_tree);
     let parse_tree = grammar::syntactic::parse(source).0.unwrap();
     let ctx = SyntaxContext::new("source.txt", source);
     if let ParseTree::Module { definitions, .. } = parse_tree.data.as_ref() {
