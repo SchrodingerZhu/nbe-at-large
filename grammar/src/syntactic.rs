@@ -513,8 +513,8 @@ mod implementation {
             module Test
             import Primitive
             data List (a : Type) = {
-                Nil : List a;
-                Cons : a -> List a -> List a;
+                Nil : List<a>;
+                Cons : a -> List<a> -> List<a>;
             }
         ";
         let steam = crate::lexical::LexerStream::chumsky_stream(src);
@@ -540,8 +540,8 @@ mod implementation {
             module Test
             import Primitive
             map f list = case list of {
-                Nil -> Nil;
-                Cons head tail -> Cons (f head) (map f tail);
+                Nil -> @Nil;
+                Cons head tail -> (@Cons (f head) (map f tail));
             }
         ";
         let stream = crate::lexical::LexerStream::chumsky_stream(src);
