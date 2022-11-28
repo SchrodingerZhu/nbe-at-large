@@ -93,6 +93,12 @@ pub struct SrcSpan<'a> {
 impl<'a> chumsky::Span for SrcSpan<'a> {
     type Context = &'a str;
     type Offset = usize;
+    fn new(context: Self::Context, range: std::ops::Range<Self::Offset>) -> Self {
+        Self {
+            source: context,
+            span: range,
+        }
+    }
     fn context(&self) -> Self::Context {
         self.source
     }
@@ -101,12 +107,6 @@ impl<'a> chumsky::Span for SrcSpan<'a> {
     }
     fn end(&self) -> Self::Offset {
         self.span.end
-    }
-    fn new(context: Self::Context, range: std::ops::Range<Self::Offset>) -> Self {
-        Self {
-            source: context,
-            span: range,
-        }
     }
 }
 

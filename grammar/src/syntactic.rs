@@ -111,7 +111,16 @@ pub enum ParseTree<'a> {
 
 pub type ParserError<'src> = Simple<Token, SrcSpan<'src>>;
 
-pub fn parse<'a>(src: &'a str) -> (Option<Ptr<ParseTree<'a>>>, Vec<ParserError<'a>>) {
+impl<'a> ParseTree<'a> {
+    pub fn get_literal(&self) -> &'a str {
+        match self {
+            ParseTree::Literal(x) => *x,
+            _ => unreachable!()
+        }
+    }
+}
+
+pub fn parse(src: &str) -> (Option<Ptr<ParseTree>>, Vec<ParserError>) {
     let stream = crate::lexical::LexerStream::chumsky_stream(src.as_ref());
     implementation::parse_module().parse_recovery_verbose(stream)
 }

@@ -1,9 +1,31 @@
-use grammar::syntactic::{ParseTree, Ptr};
 use std::{collections::HashMap, rc::Rc};
+use std::cell::UnsafeCell;
+use std::hash::{Hash, Hasher};
+use ariadne::{Color, Span};
+
+use grammar::syntactic::{ParseTree, Ptr};
 
 #[derive(Clone, Debug)]
 #[repr(transparent)]
 pub struct Name(Rc<String>);
+
+impl PartialEq for Name {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Hash for Name {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        Rc::as_ptr(&self.0).hash(state);
+    }
+}
+
+impl Name {
+    fn new<S : AsRef<str>>(name : S) -> Self {
+        Name(Rc::new(name.as_ref().to_string()))
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct RcPtr<T> {
@@ -26,9 +48,10 @@ pub enum Term {
     Lam(Name, RcPtr<Self>),
     App(RcPtr<Self>, RcPtr<Self>),
     Pi(RcPtr<Self>, Name, RcPtr<Self>),
+    Arrow(RcPtr<Self>, RcPtr<Self>),
     Ann(RcPtr<Self>, RcPtr<Self>),
     Let(Name, RcPtr<Self>, RcPtr<Self>),
-    TrustMe,
+    // TrustMe,
     BottomType,
     BottomElim,
     UnitType,
@@ -50,7 +73,12 @@ type Results<'a, T> = (
 struct SyntaxContext<'a> {
     source_name: &'a str,
     source: &'a str,
-    variables: HashMap<&'a str, Name>,
+    variables: UnsafeCell<HashMap<&'a str, Name>>,
+}
+
+struct Guard<'src, 'ctx> {
+    context: &'ctx SyntaxContext<'src>,
+    replacement: Option<(&'src str, Name)>,
 }
 
 impl<'a> SyntaxContext<'a> {
@@ -58,7 +86,7 @@ impl<'a> SyntaxContext<'a> {
         Self {
             source_name,
             source,
-            variables: HashMap::new(),
+            variables: UnsafeCell::new(HashMap::new()),
         }
     }
     fn init_error(
@@ -73,15 +101,92 @@ impl<'a> SyntaxContext<'a> {
     ) -> ariadne::ReportBuilder<(&'a str, std::ops::Range<usize>)> {
         ariadne::Report::build(ariadne::ReportKind::Warning, self.source_name, offset)
     }
+    fn get_variable(&self, name: &str) -> Option<Name> {
+        unsafe {
+            let map = &*self.variables.get();
+            map.get(name).cloned()
+        }
+    }
+    fn push_variable<'ctx>(&'ctx self, name: &'a str) -> Guard<'a, 'ctx> {
+        Guard {
+            context: self,
+            replacement: unsafe {
+                (*self.variables.get()).insert(name, Name::new(name))
+                    .map(|x| (name, x))
+            }
+        }
+    }
 }
 
 impl Term {
+    fn new_from_type<'a>(
+        ctx: &mut SyntaxContext<'a>,
+        tree: &Ptr<ParseTree<'_>>,
+    ) -> Results<'a, RcPtr<Self>> {
+        todo!()
+    }
+
     fn new_from_expr<'a>(
         ctx: &mut SyntaxContext<'a>,
         tree: &Ptr<ParseTree<'_>>,
     ) -> Results<'a, RcPtr<Self>> {
         todo!()
     }
+
+    fn new_from_variable<'a>(
+        ctx: &mut SyntaxContext<'a>,
+        tree: &Ptr<ParseTree<'a>>,
+    ) -> Results<'a, RcPtr<Self>> {
+        fn unresolved_var<'a>(ctx: &SyntaxContext<'a>, tree: &Ptr<ParseTree<'a>>, name: &Ptr<ParseTree<'a>>) -> ariadne::Report<(&'a str, std::ops::Range<usize>)> {
+            ctx.init_error(tree.location.start)
+                .with_message("unresolved variable")
+                .with_label(ariadne::Label::new((ctx.source_name, name.location.clone()))
+                    .with_color(ariadne::Color::Red)
+                    .with_message(format!("variable {} cannot be resolved within scope", name.get_literal())))
+                .finish()
+        }
+        match tree.data.as_ref() {
+            ParseTree::Variable { name, annotation } => {
+                let literal = name.get_literal();
+                if let Some(var) = ctx.get_variable(literal) {
+                    let term = move || {
+                        let location = name.location.clone();
+                        let data = Rc::new(Term::Variable(var));
+                        RcPtr {
+                            location,
+                            data
+                        }
+                    };
+                    if let Some(ann) = annotation {
+                        let (r#type, errs) = Term::new_from_type(ctx, ann);
+                        let term = r#type.map(move |ann| {
+                            let term = term();
+                            RcPtr {
+                                location: tree.location.clone(),
+                                data: Rc::new(Term::Ann(term, ann))
+                            }
+                        });
+                        (term, errs)
+                    } else {
+                        (Some(term()), Vec::new())
+                    }
+                } else {
+                    (None, vec![unresolved_var(ctx, tree, name)])
+                }
+            }
+            ParseTree::Implicit(_) => {
+                let report = ctx.init_error(tree.location.start)
+                    .with_message("unsupported feature")
+                    .with_label(ariadne::Label::new((ctx.source_name, tree.location.clone()))
+                        .with_color(Color::Red)
+                        .with_message("implicit variables are not supported"))
+                    .finish();
+                (None, vec![report])
+            }
+            _ => unreachable!()
+        }
+    }
+
     fn new_from_definition<'a>(
         ctx: &mut SyntaxContext<'a>,
         tree: &Ptr<ParseTree<'_>>,
