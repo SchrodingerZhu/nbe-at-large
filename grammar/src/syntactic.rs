@@ -38,7 +38,10 @@ pub enum ParseTree<'a> {
     },
 
     Underscore,
-    Variable {
+    TrustMe,
+
+    Variable(Ptr<Self>),
+    Parameter {
         name: Ptr<Self>,
         annotation: Option<Ptr<Self>>,
     },
@@ -115,7 +118,7 @@ impl<'a> ParseTree<'a> {
     pub fn get_literal(&self) -> &'a str {
         match self {
             ParseTree::Literal(x) => *x,
-            _ => unreachable!()
+            _ => unreachable!(),
         }
     }
 }
@@ -160,7 +163,7 @@ mod implementation {
 
     fn parse_function_def<'a>(expr: impl Parse<'a>) -> impl Parse<'a> {
         let name = parse_literal(Token::SmallCase);
-        let params = parse_variable(expr.clone()).repeated();
+        let params = parse_parameter(expr.clone()).repeated();
         let consume_equal = just(Token::Equal);
         name.then(params)
             .then_ignore(consume_equal)
@@ -258,22 +261,14 @@ mod implementation {
         })
     }
 
-    fn parse_type_variable<'a>() -> impl Parse<'a> {
+    fn parse_variable<'a>() -> impl Parse<'a> {
         let name = parse_literal(Token::SmallCase);
-        name.map_with_span(|name, span| {
-            Ptr::new(
-                span.span,
-                Variable {
-                    name,
-                    annotation: None,
-                },
-            )
-        })
+        name.map_with_span(|name, span| Ptr::new(span.span, Variable(name)))
     }
 
     fn parse_simple_type_expr<'a>(expr: impl Parse<'a>, r#type: impl Parse<'a>) -> impl Parse<'a> {
         parse_type_expr(expr)
-            .or(parse_type_variable())
+            .or(parse_variable())
             .or(parse_telescope(true, r#type.clone()))
             .or(parse_telescope(false, r#type))
     }
@@ -346,8 +341,13 @@ mod implementation {
         // pattern matching
         // let in
         // type expr
+        // trustme
+
         recursive(|expr| {
-            parse_variable(expr.clone())
+            let trustme = just(Token::TrustMe)
+                .map_with_span(|_, span: SrcSpan<'a>| Ptr::new(span.span, TrustMe));
+            parse_variable()
+                .or(trustme)
                 .or(parse_function_apply(expr.clone()))
                 .or(parse_lambda(expr.clone()))
                 .or(parse_pattern_match(expr.clone()))
@@ -372,7 +372,7 @@ mod implementation {
 
     fn parse_pattern_rule<'a>(expr: impl Parse<'a>) -> impl Parse<'a> {
         let constructor = parse_literal(Token::BigCase);
-        let variables = parse_variable(expr.clone()).repeated();
+        let variables = parse_parameter(expr.clone()).repeated();
         let consume_arrow = just(Token::Arrow);
         let consume_semicolon = just(Token::SemiColon);
         constructor
@@ -394,7 +394,7 @@ mod implementation {
 
     fn parse_lambda<'a>(expr: impl Parse<'a>) -> impl Parse<'a> {
         let consume_lambda = just(Token::Lambda);
-        let variables = parse_variable(expr.clone()).repeated();
+        let variables = parse_parameter(expr.clone()).repeated();
         let consume_dot = just(Token::Dot);
         consume_lambda
             .ignore_then(variables)
@@ -419,7 +419,7 @@ mod implementation {
         let consume_equal = just(Token::Equal);
         let consume_in = just(Token::In);
         consume_let
-            .ignore_then(parse_variable(expr.clone()))
+            .ignore_then(parse_parameter(expr.clone()))
             .then_ignore(consume_equal)
             .then(expr.clone())
             .then_ignore(consume_in)
@@ -429,7 +429,7 @@ mod implementation {
             })
     }
 
-    fn parse_variable<'a>(expr: impl Parse<'a>) -> impl Parse<'a> {
+    fn parse_parameter<'a>(expr: impl Parse<'a>) -> impl Parse<'a> {
         let consume_lparen = just(Token::LParen);
         let consume_lsquare = just(Token::LSquare);
         let consume_rparen = just(Token::RParen);
@@ -442,7 +442,7 @@ mod implementation {
             parse_literal(Token::SmallCase).map_with_span(|name, span| {
                 Ptr::new(
                     span.span,
-                    Variable {
+                    Parameter {
                         name,
                         annotation: None,
                     },
@@ -456,7 +456,7 @@ mod implementation {
                 .map_with_span(|(name, annotation), span| {
                     Ptr::new(
                         span.span,
-                        Variable {
+                        Parameter {
                             name,
                             annotation: Some(annotation),
                         },

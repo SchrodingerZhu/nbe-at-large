@@ -74,6 +74,9 @@ pub enum Token {
     #[token("in")]
     In,
 
+    #[token("!!")]
+    TrustMe,
+
     // Logos requires one token variant to handle errors,
     // it can be named anything you wish.
     #[error]

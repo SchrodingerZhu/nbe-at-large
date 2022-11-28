@@ -45,13 +45,12 @@ impl<T> std::ops::Deref for RcPtr<T> {
 pub enum Term {
     Type,
     Variable(Name),
-    Lam(Name, RcPtr<Self>),
+    Lam(Option<Name>, RcPtr<Self>),
     App(RcPtr<Self>, RcPtr<Self>),
-    Pi(RcPtr<Self>, Name, RcPtr<Self>),
-    Arrow(RcPtr<Self>, RcPtr<Self>),
+    Pi(RcPtr<Self>, Option<Name>, RcPtr<Self>),
     Ann(RcPtr<Self>, RcPtr<Self>),
     Let(Name, RcPtr<Self>, RcPtr<Self>),
-    // TrustMe,
+    TrustMe,
     BottomType,
     BottomElim,
     UnitType,
@@ -63,6 +62,11 @@ pub enum Term {
     SigmaType(RcPtr<Self>, Name, RcPtr<Self>),
     SigmaIntro(RcPtr<Self>, RcPtr<Self>),
     SigmaElim(Name, Name, RcPtr<Self>, RcPtr<Self>),
+}
+
+pub enum Defintion {
+    FuncDecl(Name, Term),
+    FuncDefine(Name, Term)
 }
 
 type Results<'a, T> = (
@@ -146,10 +150,10 @@ impl Term {
                 .finish()
         }
         match tree.data.as_ref() {
-            ParseTree::Variable { name, annotation } => {
+            ParseTree::Variable(name) => {
                 let literal = name.get_literal();
                 if let Some(var) = ctx.get_variable(literal) {
-                    let term = move || {
+                    let term =  {
                         let location = name.location.clone();
                         let data = Rc::new(Term::Variable(var));
                         RcPtr {
@@ -157,31 +161,10 @@ impl Term {
                             data
                         }
                     };
-                    if let Some(ann) = annotation {
-                        let (r#type, errs) = Term::new_from_type(ctx, ann);
-                        let term = r#type.map(move |ann| {
-                            let term = term();
-                            RcPtr {
-                                location: tree.location.clone(),
-                                data: Rc::new(Term::Ann(term, ann))
-                            }
-                        });
-                        (term, errs)
-                    } else {
-                        (Some(term()), Vec::new())
-                    }
+                    (Some(term), Vec::new())
                 } else {
                     (None, vec![unresolved_var(ctx, tree, name)])
                 }
-            }
-            ParseTree::Implicit(_) => {
-                let report = ctx.init_error(tree.location.start)
-                    .with_message("unsupported feature")
-                    .with_label(ariadne::Label::new((ctx.source_name, tree.location.clone()))
-                        .with_color(Color::Red)
-                        .with_message("implicit variables are not supported"))
-                    .finish();
-                (None, vec![report])
             }
             _ => unreachable!()
         }
