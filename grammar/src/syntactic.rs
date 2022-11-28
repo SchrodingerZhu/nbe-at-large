@@ -92,11 +92,6 @@ pub enum ParseTree<'a> {
         args: Vec<Ptr<Self>>,
     },
 
-    Branch {
-        r#if: Ptr<Self>,
-        then: Ptr<Self>,
-        r#else: Ptr<Self>,
-    },
     // no nested destructure for now
     PatternRule {
         constructor: Ptr<Self>,

@@ -280,6 +280,20 @@ impl Term {
                     (None, vec![report])
                 }
             },
+            ParseTree::Let { var, binding, body } => {
+                let (binding, mut binding_reports) = Term::new_from_expr(ctx, binding);
+                match var.data.as_ref() {
+                    ParseTree::AnnotableVariable { name, annotation } => {
+                        let (_, _guard) = ctx.push_variable(name.get_literal());
+                        let (body, mut body_reports) = Term::new_from_expr(ctx, body);
+                        if let (Some(ann)) = annotation {
+                            let (ann, mut ann_reports) = Term::new_from_type(ctx, ann);
+                        }
+                        todo!()
+                    }
+                    _ => assert_unreachable!(),
+                }
+            }
             ParseTree::Variable(_) => Term::new_from_variable(ctx, tree),
             ParseTree::FuncApply { func, args } => {
                 let (func, mut reports) = Term::new_from_expr(ctx, func);
