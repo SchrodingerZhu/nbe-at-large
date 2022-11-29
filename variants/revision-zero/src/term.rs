@@ -363,28 +363,11 @@ impl Term {
                     let var_b = RcPtr::new(location.clone(), Term::Variable(b.clone()));
                     let sigma = RcPtr::new(location.clone(), Term::SigmaIntro(var_a, var_b));
                     let lambda = RcPtr::new(location.clone(), Term::Lam(Some(b), sigma));
-                    let lambda = RcPtr {
-                        location,
-                        data: Rc::new(Term::Lam(Some(a), lambda)),
-                    };
-                    (Some(lambda), vec![]).into()
+                    let lambda = RcPtr::new(location, Term::Lam(Some(a), lambda));
+                    lambda.into()
                 }
-                "True" => (
-                    Some(RcPtr {
-                        location,
-                        data: Rc::new(Term::BoolIntro(true)),
-                    }),
-                    vec![],
-                )
-                    .into(),
-                "False" => (
-                    Some(RcPtr {
-                        location,
-                        data: Rc::new(Term::BoolIntro(false)),
-                    }),
-                    vec![],
-                )
-                    .into(),
+                "True" => RcPtr::new(location, Term::BoolIntro(true)).into(),
+                "False" => RcPtr::new(location, Term::BoolIntro(false)).into(),
                 lit => {
                     let report = ctx
                         .init_error(location.start)
@@ -395,75 +378,74 @@ impl Term {
                                 .with_message(format!("custom construct {} is not supported", lit)),
                         )
                         .finish();
-                    (None, vec![report]).into()
+                    report.into()
                 }
             },
-            ParseTree::Let { var, binding, body } => {
-               Term::new_from_expr(ctx, binding).and_then_optional(|mut binding| {
-                   match var.data.as_ref() {
-                       ParseTree::AnnotableVariable { name, annotation } => {
-                           let (name, _guard) = ctx.push_variable(name.get_literal());
-                           Term::new_from_expr(ctx, body).and_then_optional(|body| {
-                               let mut reports = Vec::new();
-                               if let Some(ann) = annotation {
-                                   let (ann, ann_reports) = Term::new_from_type(ctx, ann).to_tuple();
-                                   reports = ann_reports;
-                                   binding = binding.and_then(move |binding| {
-                                       ann.map(|ann| {
-                                           RcPtr::new(
-                                               binding.location.start..ann.location.end,
-                                               Term::Ann(binding, ann),
-                                           )
-                                       })
-                                   });
-                               }
-                               let expr = binding.and_then(move |binding| {
-                                   body.map(move |body| {
-                                       RcPtr::new(tree.location.clone(), Term::Let(name, binding, body))
-                                   })
-                               });
-                               (expr, reports).into()
-                           })
-                       }
-                       _ => assert_unreachable!(),
-                   }
-               })
-            }
+            ParseTree::Let { var, binding, body } => Term::new_from_expr(ctx, binding)
+                .and_then_optional(|mut binding| match var.data.as_ref() {
+                    ParseTree::AnnotableVariable { name, annotation } => {
+                        let (name, _guard) = ctx.push_variable(name.get_literal());
+                        Term::new_from_expr(ctx, body).and_then_optional(|body| {
+                            let mut reports = Vec::new();
+                            if let Some(ann) = annotation {
+                                let (ann, ann_reports) = Term::new_from_type(ctx, ann).to_tuple();
+                                reports = ann_reports;
+                                binding = binding.and_then(move |binding| {
+                                    ann.map(|ann| {
+                                        RcPtr::new(
+                                            binding.location.start..ann.location.end,
+                                            Term::Ann(binding, ann),
+                                        )
+                                    })
+                                });
+                            }
+                            let expr = binding.and_then(move |binding| {
+                                body.map(move |body| {
+                                    RcPtr::new(
+                                        tree.location.clone(),
+                                        Term::Let(name, binding, body),
+                                    )
+                                })
+                            });
+                            (expr, reports).into()
+                        })
+                    }
+                    _ => assert_unreachable!(),
+                }),
             ParseTree::Variable(_) => Term::new_from_variable(ctx, tree),
-            ParseTree::FuncApply { func, args } => {
-               Term::new_from_expr(ctx, func).and_then_optional(|func| {
-                   let mut reports = Vec::new();
-                   let mut translated_args = Some(Vec::new());
-                   for i in args.iter() {
-                       let (arg, mut arg_reports) = Term::new_from_expr(ctx, i).to_tuple();
-                       reports.append(&mut arg_reports);
-                       translated_args = translated_args.and_then(move |mut x| {
-                           arg.map(|arg| {
-                               x.push(arg);
-                               x
-                           })
-                       });
-                   }
-                   let apply = func
-                       .and_then(move |f| translated_args.map(move |args| (f, args)))
-                       .and_then(move |(f, args)| {
-                           let mut res = Some(f);
-                           for i in args.into_iter() {
-                               res = res.map(move |tree: RcPtr<Term>| {
-                                   RcPtr::new(tree.location.start..i.location.end, Term::App(tree, i))
-                               });
-                           }
-                           res
-                       });
-                   (apply, reports).into()
-               })
-            }
+            ParseTree::FuncApply { func, args } => Term::new_from_expr(ctx, func)
+                .and_then_optional(|func| {
+                    let mut reports = Vec::new();
+                    let mut translated_args = Some(Vec::new());
+                    for i in args.iter() {
+                        let (arg, mut arg_reports) = Term::new_from_expr(ctx, i).to_tuple();
+                        reports.append(&mut arg_reports);
+                        translated_args = translated_args.and_then(move |mut x| {
+                            arg.map(|arg| {
+                                x.push(arg);
+                                x
+                            })
+                        });
+                    }
+                    let apply = func
+                        .and_then(move |f| translated_args.map(move |args| (f, args)))
+                        .and_then(move |(f, args)| {
+                            let mut res = Some(f);
+                            for i in args.into_iter() {
+                                res = res.map(move |tree: RcPtr<Term>| {
+                                    RcPtr::new(
+                                        tree.location.start..i.location.end,
+                                        Term::App(tree, i),
+                                    )
+                                });
+                            }
+                            res
+                        });
+                    (apply, reports).into()
+                }),
             ParseTree::TrustMe => {
-                let term = RcPtr {
-                    location,
-                    data: Rc::new(Term::TrustMe),
-                };
-                (Some(term), vec![]).into()
+                let term = RcPtr::new(location, Term::TrustMe);
+                term.into()
             }
             _ => assert_unreachable!(),
         }
@@ -538,8 +520,8 @@ impl Term {
                 if let Some(var) = ctx.get_variable(literal) {
                     let term = {
                         let location = name.location.clone();
-                        let data = Rc::new(Term::Variable(var));
-                        RcPtr { location, data }
+                        let data = Term::Variable(var);
+                        RcPtr::new(location, data)
                     };
                     (Some(term), Vec::new()).into()
                 } else {
