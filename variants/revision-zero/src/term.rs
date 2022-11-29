@@ -1,5 +1,5 @@
 use ariadne::{Color, Label, Report, Span};
-use std::cell::UnsafeCell;
+use std::cell::{Cell, UnsafeCell};
 use std::hash::{Hash, Hasher};
 use std::{collections::HashMap, rc::Rc};
 
@@ -61,7 +61,7 @@ pub enum Term {
     BoolIntro(bool),
     BoolElim(RcPtr<Self>, RcPtr<Self>, RcPtr<Self>),
     SigmaType(RcPtr<Self>, Name, RcPtr<Self>),
-    SigmaIntro,
+    SigmaIntro(RcPtr<Self>, RcPtr<Self>),
     SigmaElim(Name, Name, RcPtr<Self>, RcPtr<Self>),
 }
 
@@ -142,6 +142,7 @@ struct SyntaxContext<'a> {
     source_name: &'a str,
     source: &'a str,
     variables: UnsafeCell<HashMap<&'a str, Name>>,
+    fresh_counter: Cell<usize>,
 }
 
 struct Guard<'src, 'ctx> {
@@ -155,6 +156,7 @@ impl<'a> SyntaxContext<'a> {
             source_name,
             source,
             variables: UnsafeCell::new(HashMap::new()),
+            fresh_counter: Cell::new(0),
         }
     }
     fn init_error(
@@ -186,6 +188,12 @@ impl<'a> SyntaxContext<'a> {
             },
         };
         (unique_name, guard)
+    }
+
+    fn fresh(&self) -> Name {
+        let counter = self.fresh_counter.get();
+        self.fresh_counter.replace(counter + 1);
+        Name::new(format!("fresh_{}", counter))
     }
 }
 
@@ -246,13 +254,31 @@ impl Term {
                     }),
                     vec![],
                 ),
-                "Pair" => (
-                    Some(RcPtr {
-                        location,
-                        data: Rc::new(Term::SigmaIntro),
-                    }),
-                    vec![],
-                ),
+                "Pair" => {
+                    let a = ctx.fresh();
+                    let b = ctx.fresh();
+                    let var_a = RcPtr {
+                        location: location.clone(),
+                        data: Rc::new(Term::Variable(a.clone())),
+                    };
+                    let var_b = RcPtr {
+                        location: location.clone(),
+                        data: Rc::new(Term::Variable(b.clone())),
+                    };
+                    let sigma = RcPtr {
+                        location: location.clone(),
+                        data: Rc::new(Term::SigmaIntro(var_a, var_b)),
+                    };
+                    let lambda = RcPtr {
+                        location: location.clone(),
+                        data: Rc::new(Term::Lam(Some(b), sigma)),
+                    };
+                    let lambda = RcPtr {
+                        location: location.clone(),
+                        data: Rc::new(Term::Lam(Some(a), lambda)),
+                    };
+                    (Some(lambda), vec![])
+                }
                 "True" => (
                     Some(RcPtr {
                         location,
