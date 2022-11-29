@@ -274,7 +274,7 @@ impl Term {
                         data: Rc::new(Term::Lam(Some(b), sigma)),
                     };
                     let lambda = RcPtr {
-                        location: location.clone(),
+                        location,
                         data: Rc::new(Term::Lam(Some(a), lambda)),
                     };
                     (Some(lambda), vec![])
@@ -307,15 +307,31 @@ impl Term {
                 }
             },
             ParseTree::Let { var, binding, body } => {
-                let (binding, mut binding_reports) = Term::new_from_expr(ctx, binding);
+                let mut reports = Vec::new();
+                let (mut binding, mut binding_reports) = Term::new_from_expr(ctx, binding);
                 match var.data.as_ref() {
                     ParseTree::AnnotableVariable { name, annotation } => {
-                        let (_, _guard) = ctx.push_variable(name.get_literal());
+                        let (name, _guard) = ctx.push_variable(name.get_literal());
                         let (body, mut body_reports) = Term::new_from_expr(ctx, body);
-                        if let (Some(ann)) = annotation {
+                        reports.append(&mut binding_reports);
+                        reports.append(&mut body_reports);
+                        if let Some(ann) = annotation {
                             let (ann, mut ann_reports) = Term::new_from_type(ctx, ann);
+                            reports.append(&mut ann_reports);
+                            binding = binding.and_then(move |binding| {
+                                ann.map(|ann| RcPtr {
+                                    location: binding.location.start..ann.location.end,
+                                    data: Rc::new(Term::Ann(binding, ann)),
+                                })
+                            });
                         }
-                        todo!()
+                        let expr = binding.and_then(move |binding| {
+                            body.map(move |body| RcPtr {
+                                location: tree.location.clone(),
+                                data: Rc::new(Term::Let(name, binding, body)),
+                            })
+                        });
+                        (expr, reports)
                     }
                     _ => assert_unreachable!(),
                 }
@@ -475,7 +491,7 @@ fn test() {
 fn test_2() {
     let source = r#"
     module Test
-    test x = lambda y . (@Pair x y) 
+    test x = let u = lambda y . (@Pair x y) in u 
 "#;
     let parse_tree = grammar::syntactic::parse(source).1;
     eprintln!("{:#?}", parse_tree);
@@ -487,6 +503,6 @@ fn test_2() {
             i.eprint(("source.txt", ariadne::Source::from(source)))
                 .unwrap();
         }
-        println!("{:#?}", func_def.0)
+        println!("{:?}", func_def.0)
     }
 }
