@@ -43,7 +43,7 @@ pub enum ParseTree<'a> {
     ConstructorRef(Ptr<Self>),
     AnnotableVariable {
         // in let expr
-        name: Ptr<Self>,
+        name: Option<Ptr<Self>>,
         annotation: Option<Ptr<Self>>,
     },
     Parameter {
@@ -452,7 +452,12 @@ mod implementation {
 
     fn parse_annotable_variable<'a>(expr: impl Parse<'a>) -> impl Parse<'a> {
         let consume_colon = just(Token::Colon);
-        let annotated = parse_literal(Token::SmallCase)
+        let name = || {
+            parse_literal(Token::SmallCase)
+                .map(|x| Some(x))
+                .or(just(Token::Underscore).to(None))
+        };
+        let annotated = name()
             .then_ignore(consume_colon)
             .then(parse_type(expr))
             .map_with_span(|(name, annotation), span| {
@@ -465,7 +470,7 @@ mod implementation {
                 )
             });
         let unannotated = {
-            parse_literal(Token::SmallCase).map_with_span(|name, span| {
+            name().map_with_span(|name, span| {
                 Ptr::new(
                     span.span,
                     AnnotableVariable {

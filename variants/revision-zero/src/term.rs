@@ -62,19 +62,18 @@ pub enum Term {
     App(RcPtr<Self>, RcPtr<Self>),
     Pi(RcPtr<Self>, Option<Name>, RcPtr<Self>),
     Ann(RcPtr<Self>, RcPtr<Self>),
-    Let(Name, RcPtr<Self>, RcPtr<Self>),
+    Let(Option<Name>, RcPtr<Self>, RcPtr<Self>),
     TrustMe,
     BottomType,
     BottomElim,
     UnitType,
     UnitIntro,
-    UnitElim(RcPtr<Self>),
     BoolType,
     BoolIntro(bool),
     BoolElim(RcPtr<Self>, RcPtr<Self>, RcPtr<Self>),
     SigmaType(RcPtr<Self>, Option<Name>, RcPtr<Self>),
     SigmaIntro(RcPtr<Self>, RcPtr<Self>),
-    SigmaElim(Name, Name, RcPtr<Self>, RcPtr<Self>),
+    SigmaElim(RcPtr<Self>, Name, Name, RcPtr<Self>),
 }
 
 pub enum Definition {
@@ -236,10 +235,98 @@ impl<'src, 'ctx> Drop for Guard<'src, 'ctx> {
     }
 }
 
+trait BuiltinType {
+    type ElimRules;
+    fn new_from_pattern_rules<'src>(
+        ctx: &SyntaxContext<'src>,
+        rules: &[Ptr<ParseTree<'src>>],
+    ) -> Result<Option<Self::ElimRules>, ()>;
+}
+
+struct BuiltinUnit;
+struct BuiltinPair;
+struct BuiltinBool;
+struct BuiltinBottom;
+
+impl BuiltinType for BuiltinUnit {
+    type ElimRules = RcPtr<Term>;
+
+    fn new_from_pattern_rules<'src>(
+        ctx: &SyntaxContext<'src>,
+        rules: &[Ptr<ParseTree<'src>>],
+    ) -> Result<Option<Self::ElimRules>, ()> {
+        match rules.first() {
+            Some(Ptr {
+                location,
+                data:
+                    box ParseTree::PatternRule {
+                        constructor,
+                        variables,
+                        body,
+                    },
+            }) => match constructor.get_literal() {
+                "Unit" if variables.is_empty() => match Term::new_from_expr(ctx, body) {
+                    None => Err(()),
+                    Some(tree) => Ok(Some(tree)),
+                },
+                "Unit" => Err(ctx.error(location.start, |builder| {
+                    builder
+                        .with_message("illegal elimination for Unit type")
+                        .with_label(
+                            Label::new((ctx.source_name, variables[0].location.clone()))
+                                .with_message("unexpected variable"),
+                        )
+                        .finish()
+                })),
+                _ => Ok(None),
+            },
+            None => Ok(None),
+            _ => assert_unreachable!(),
+        }
+    }
+}
+
+impl BuiltinType for BuiltinPair {
+    type ElimRules = (Name, Name, RcPtr<Term>, RcPtr<Term>);
+
+    fn new_from_pattern_rules<'src>(
+        ctx: &SyntaxContext<'src>,
+        rules: &[Ptr<ParseTree<'src>>],
+    ) -> Result<Option<Self::ElimRules>, ()> {
+        todo!()
+    }
+}
+
+impl BuiltinType for BuiltinBottom {
+    type ElimRules = ();
+
+    fn new_from_pattern_rules<'src>(
+        _: &SyntaxContext<'src>,
+        rules: &[Ptr<ParseTree<'src>>],
+    ) -> Result<Option<Self::ElimRules>, ()> {
+        if rules.is_empty() {
+            Ok(Some(()))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+impl BuiltinType for BuiltinBool {
+    type ElimRules = (RcPtr<Term>, RcPtr<Term>);
+
+    fn new_from_pattern_rules<'src>(
+        ctx: &SyntaxContext<'src>,
+        rules: &[Ptr<ParseTree<'src>>],
+    ) -> Result<Option<Self::ElimRules>, ()> {
+        todo!()
+    }
+}
+
 impl Term {
     fn new_from_type<'a>(
         ctx: &SyntaxContext<'a>,
-        tree: &Ptr<ParseTree<'_>>,
+        tree: &Ptr<ParseTree<'a>>,
     ) -> Option<RcPtr<Self>> {
         todo!()
     }
@@ -308,7 +395,11 @@ impl Term {
                 let mut binding = Term::new_from_expr(ctx, binding);
                 match var.data.as_ref() {
                     ParseTree::AnnotableVariable { name, annotation } => {
-                        let (name, _guard) = ctx.push_variable(name.get_literal());
+                        let (name, _guard) = name
+                            .as_ref()
+                            .map(|name| ctx.push_variable(name.get_literal()))
+                            .map(|(x, y)| (Some(x), Some(y)))
+                            .unwrap_or((None, None));
                         let body = Term::new_from_expr(ctx, body);
                         if let Some(ann) = annotation {
                             let ann = Term::new_from_type(ctx, ann);
@@ -353,6 +444,35 @@ impl Term {
                         }
                         res
                     })
+            }
+            ParseTree::PatternMatch { expr, rules } => {
+                let expr = Term::new_from_expr(ctx, expr);
+                if expr.is_none() {
+                    return None;
+                }
+                let expr = unsafe { expr.unwrap_unchecked() };
+                match BuiltinUnit::new_from_pattern_rules(ctx, rules.as_slice()) {
+                    Ok(None) => (),
+                    Ok(Some(rule)) => {
+                        let annotation = RcPtr::new(expr.location.clone(), Term::UnitType);
+                        let annotated =
+                            RcPtr::new(expr.location.clone(), Term::Ann(expr, annotation));
+                        return Some(RcPtr::new(location, Term::Let(None, annotated, rule)));
+                    }
+                    Err(_) => return None,
+                }
+                match BuiltinBottom::new_from_pattern_rules(ctx, rules.as_slice()) {
+                    Ok(None) => (),
+                    Ok(Some(_)) => {
+                        let annotation = RcPtr::new(expr.location.clone(), Term::BottomType);
+                        let annotated =
+                            RcPtr::new(expr.location.clone(), Term::Ann(expr, annotation));
+                        let explosion = RcPtr::new(location.clone(), Term::BottomElim);
+                        return Some(RcPtr::new(location, Term::Let(None, annotated, explosion)));
+                    }
+                    Err(_) => return None,
+                }
+                todo!()
             }
             ParseTree::TrustMe => Some(RcPtr::new(location, Term::TrustMe)),
             _ => assert_unreachable!(),
@@ -450,7 +570,7 @@ fn test() {
     }
 "#;
     let parse_tree = grammar::syntactic::parse(source).0.unwrap();
-    let (module, reports) = Definition::new_from_module("source.txt", source, &parse_tree);
+    let (_, reports) = Definition::new_from_module("source.txt", source, &parse_tree);
     for i in reports.iter() {
         i.eprint(("source.txt", ariadne::Source::from(source)))
             .unwrap();
@@ -458,10 +578,52 @@ fn test() {
 }
 
 #[test]
-fn test_2() {
+fn test_func_def() {
     let source = r#"
     module Test
     test x = let u = lambda y . (@Pair x y) in u 
+"#;
+    let parse_tree = grammar::syntactic::parse(source).1;
+    eprintln!("{:#?}", parse_tree);
+    let parse_tree = grammar::syntactic::parse(source).0.unwrap();
+    let ctx = SyntaxContext::new("source.txt", source);
+    if let ParseTree::Module { definitions, .. } = parse_tree.data.as_ref() {
+        let func_def = Term::new_from_function_definition(&ctx, &definitions[0]);
+        for i in ctx.reports().iter() {
+            i.eprint(("source.txt", ariadne::Source::from(source)))
+                .unwrap();
+        }
+        println!("{:?}", func_def.unwrap())
+    }
+}
+
+#[test]
+fn test_match_unit() {
+    let source = r#"
+    module Test
+    test x = case x of {
+        Unit -> !!;
+    } 
+"#;
+    let parse_tree = grammar::syntactic::parse(source).1;
+    eprintln!("{:#?}", parse_tree);
+    let parse_tree = grammar::syntactic::parse(source).0.unwrap();
+    let ctx = SyntaxContext::new("source.txt", source);
+    if let ParseTree::Module { definitions, .. } = parse_tree.data.as_ref() {
+        let func_def = Term::new_from_function_definition(&ctx, &definitions[0]);
+        for i in ctx.reports().iter() {
+            i.eprint(("source.txt", ariadne::Source::from(source)))
+                .unwrap();
+        }
+        println!("{:?}", func_def.unwrap())
+    }
+}
+
+#[test]
+fn test_match_bottom() {
+    let source = r#"
+    module Test
+    test x = case x of {} 
 "#;
     let parse_tree = grammar::syntactic::parse(source).1;
     eprintln!("{:#?}", parse_tree);

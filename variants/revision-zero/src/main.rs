@@ -1,3 +1,5 @@
+#![feature(adt_const_params)]
+#![feature(box_patterns)]
 mod term;
 
 #[macro_export]
