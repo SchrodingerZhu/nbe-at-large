@@ -65,15 +65,16 @@ pub enum Term {
     Let(Option<Name>, RcPtr<Self>, RcPtr<Self>),
     TrustMe,
     BottomType,
-    BottomElim,
+    BottomElim(RcPtr<Self>),
     UnitType,
     UnitIntro,
+    UnitElim(RcPtr<Self>, RcPtr<Self>),
     BoolType,
     BoolIntro(bool),
     BoolElim(RcPtr<Self>, RcPtr<Self>, RcPtr<Self>),
     SigmaType(RcPtr<Self>, Option<Name>, RcPtr<Self>),
     SigmaIntro(RcPtr<Self>, RcPtr<Self>),
-    SigmaElim(RcPtr<Self>, Name, Name, RcPtr<Self>),
+    SigmaElim(RcPtr<Self>, Option<Name>, Option<Name>, RcPtr<Self>),
 }
 
 pub enum Definition {
@@ -255,6 +256,9 @@ impl BuiltinType for BuiltinUnit {
         ctx: &SyntaxContext<'src>,
         rules: &[Ptr<ParseTree<'src>>],
     ) -> Result<Option<Self::ElimRules>, ()> {
+        if rules.len() != 1 {
+            return Ok(None);
+        }
         match rules.first() {
             Some(Ptr {
                 location,
@@ -271,29 +275,71 @@ impl BuiltinType for BuiltinUnit {
                 },
                 "Unit" => Err(ctx.error(location.start, |builder| {
                     builder
-                        .with_message("illegal elimination for Unit type")
+                        .with_message("Illegal elimination for Unit type")
                         .with_label(
                             Label::new((ctx.source_name, variables[0].location.clone()))
-                                .with_message("unexpected variable"),
+                                .with_color(Color::Red)
+                                .with_message("unexpected variable(s)"),
                         )
                         .finish()
                 })),
                 _ => Ok(None),
             },
-            None => Ok(None),
             _ => assert_unreachable!(),
         }
     }
 }
 
 impl BuiltinType for BuiltinPair {
-    type ElimRules = (Name, Name, RcPtr<Term>, RcPtr<Term>);
+    type ElimRules = (Option<Name>, Option<Name>, RcPtr<Term>);
 
     fn new_from_pattern_rules<'src>(
         ctx: &SyntaxContext<'src>,
         rules: &[Ptr<ParseTree<'src>>],
     ) -> Result<Option<Self::ElimRules>, ()> {
-        todo!()
+        if rules.len() != 1 {
+            return Ok(None);
+        }
+        match rules.first() {
+            Some(Ptr {
+                location,
+                data:
+                    box ParseTree::PatternRule {
+                        constructor,
+                        variables,
+                        body,
+                    },
+            }) => match constructor.get_literal() {
+                "Pair" if variables.len() == 2 => {
+                    let (left, _left_guard) = Term::new_from_parameter(ctx, &variables[0])
+                        .map(|name| ctx.push_variable(name))
+                        .map(|(x, y)| (Some(x), Some(y)))
+                        .unwrap_or((None, None));
+                    let (right, _right_guard) = Term::new_from_parameter(ctx, &variables[1])
+                        .map(|name| ctx.push_variable(name))
+                        .map(|(x, y)| (Some(x), Some(y)))
+                        .unwrap_or((None, None));
+                    match Term::new_from_expr(ctx, body) {
+                        None => Err(()),
+                        Some(body) => Ok(Some((left, right, body))),
+                    }
+                }
+                "Pair" => Err(ctx.error(location.start, |builder| {
+                    builder
+                        .with_message("Illegal elimination for Sigma type")
+                        .with_label(
+                            Label::new((ctx.source_name, location.clone()))
+                                .with_color(Color::Red)
+                                .with_message(
+                                    "the number parameter is not unmatched for Pair constructor",
+                                ),
+                        )
+                        .finish()
+                })),
+                _ => Ok(None),
+            },
+            _ => assert_unreachable!(),
+        }
     }
 }
 
@@ -319,6 +365,9 @@ impl BuiltinType for BuiltinBool {
         ctx: &SyntaxContext<'src>,
         rules: &[Ptr<ParseTree<'src>>],
     ) -> Result<Option<Self::ElimRules>, ()> {
+        if rules.len() != 2 {
+            return Ok(None);
+        }
         todo!()
     }
 }
@@ -454,25 +503,43 @@ impl Term {
                 match BuiltinUnit::new_from_pattern_rules(ctx, rules.as_slice()) {
                     Ok(None) => (),
                     Ok(Some(rule)) => {
-                        let annotation = RcPtr::new(expr.location.clone(), Term::UnitType);
-                        let annotated =
-                            RcPtr::new(expr.location.clone(), Term::Ann(expr, annotation));
-                        return Some(RcPtr::new(location, Term::Let(None, annotated, rule)));
+                        return Some(RcPtr::new(location, Term::UnitElim(expr, rule)));
                     }
                     Err(_) => return None,
                 }
                 match BuiltinBottom::new_from_pattern_rules(ctx, rules.as_slice()) {
                     Ok(None) => (),
                     Ok(Some(_)) => {
-                        let annotation = RcPtr::new(expr.location.clone(), Term::BottomType);
-                        let annotated =
-                            RcPtr::new(expr.location.clone(), Term::Ann(expr, annotation));
-                        let explosion = RcPtr::new(location.clone(), Term::BottomElim);
-                        return Some(RcPtr::new(location, Term::Let(None, annotated, explosion)));
+                        return Some(RcPtr::new(location, Term::BottomElim(expr)));
                     }
                     Err(_) => return None,
                 }
-                todo!()
+                match BuiltinPair::new_from_pattern_rules(ctx, rules.as_slice()) {
+                    Ok(None) => (),
+                    Ok(Some((left, right, body))) => {
+                        return Some(RcPtr::new(
+                            location,
+                            Term::SigmaElim(expr, left, right, body),
+                        ));
+                    }
+                    Err(_) => return None,
+                }
+                match BuiltinBool::new_from_pattern_rules(ctx, rules.as_slice()) {
+                    Ok(None) => (),
+                    Ok(Some((r#true, r#false))) => {
+                        return Some(RcPtr::new(location, Term::BoolElim(expr, r#true, r#false)));
+                    }
+                    Err(_) => return None,
+                }
+                ctx.error(location.start, |builder| {
+                    builder
+                        .with_message("unsupported feature")
+                        .with_label(Label::new((ctx.source_name, location.clone()))
+                            .with_color(Color::Red)
+                            .with_message("only pattern matchings on Sigma, Unit, Bottom, Bool are supported"))
+                        .finish()
+                });
+                None
             }
             ParseTree::TrustMe => Some(RcPtr::new(location, Term::TrustMe)),
             _ => assert_unreachable!(),
@@ -624,6 +691,28 @@ fn test_match_bottom() {
     let source = r#"
     module Test
     test x = case x of {} 
+"#;
+    let parse_tree = grammar::syntactic::parse(source).1;
+    eprintln!("{:#?}", parse_tree);
+    let parse_tree = grammar::syntactic::parse(source).0.unwrap();
+    let ctx = SyntaxContext::new("source.txt", source);
+    if let ParseTree::Module { definitions, .. } = parse_tree.data.as_ref() {
+        let func_def = Term::new_from_function_definition(&ctx, &definitions[0]);
+        for i in ctx.reports().iter() {
+            i.eprint(("source.txt", ariadne::Source::from(source)))
+                .unwrap();
+        }
+        println!("{:?}", func_def.unwrap())
+    }
+}
+
+#[test]
+fn test_match_pair() {
+    let source = r#"
+    module Test
+    test x = case x of {
+        Pair l _ -> l;
+    } 
 "#;
     let parse_tree = grammar::syntactic::parse(source).1;
     eprintln!("{:#?}", parse_tree);

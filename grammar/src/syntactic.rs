@@ -391,9 +391,7 @@ mod implementation {
 
     fn parse_pattern_rule<'a>(expr: impl Parse<'a>) -> impl Parse<'a> {
         let constructor = parse_literal(Token::BigCase);
-        let underscore = just(Token::Underscore)
-            .map_with_span(|_, span: SrcSpan<'a>| Ptr::new(span.span, ParseTree::Underscore));
-        let variables = parse_variable().or(underscore).repeated();
+        let variables = parse_parameter().repeated();
         let consume_arrow = just(Token::Arrow);
         let consume_semicolon = just(Token::SemiColon);
         constructor
