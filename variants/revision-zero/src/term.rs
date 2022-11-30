@@ -447,13 +447,6 @@ impl BuiltinType for BuiltinBool {
 }
 
 impl Term {
-    fn new_from_type<'a>(
-        ctx: &SyntaxContext<'a>,
-        tree: &Ptr<ParseTree<'a>>,
-    ) -> Option<RcPtr<Self>> {
-        todo!()
-    }
-
     fn new_from_parameter<'a>(
         ctx: &SyntaxContext<'a>,
         tree: &Ptr<ParseTree<'a>>,
@@ -525,7 +518,7 @@ impl Term {
                             .unwrap_or((None, None));
                         let body = Term::new_from_expr(ctx, body);
                         if let Some(ann) = annotation {
-                            let ann = Term::new_from_type(ctx, ann);
+                            let ann = Term::new_from_expr(ctx, ann);
                             binding = binding.and_then(move |binding| {
                                 ann.map(|ann| {
                                     RcPtr::new(
@@ -616,6 +609,7 @@ impl Term {
                 None
             }
             ParseTree::TrustMe => Some(RcPtr::new(location, Term::TrustMe)),
+            ParseTree::Type => Some(RcPtr::new(location, Term::Type)),
             _ => assert_unreachable!(),
         }
     }
