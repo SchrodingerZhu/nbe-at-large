@@ -274,7 +274,7 @@ impl Term {
         match tree.data.as_ref() {
             ParseTree::Lambda { params, body } => Term::new_from_params_and_body(ctx, params, body),
             ParseTree::ConstructorRef(name) => match name.get_literal() {
-                "Unit'" => Some(RcPtr::new(location, Term::UnitIntro)),
+                "Unit" => Some(RcPtr::new(location, Term::UnitIntro)),
                 "Pair" => {
                     let a = ctx.fresh();
                     let b = ctx.fresh();
