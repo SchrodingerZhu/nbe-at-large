@@ -1,4 +1,4 @@
-use ariadne::{Color, Label, Report, Span};
+use ariadne::{Color, Label, Report, ReportBuilder};
 use std::cell::{Cell, UnsafeCell};
 use std::hash::{Hash, Hasher};
 use std::ops::Range;
@@ -51,6 +51,8 @@ impl<T> std::ops::Deref for RcPtr<T> {
     }
 }
 
+type NamedSpan<'a> = (&'a str, std::ops::Range<usize>);
+
 #[derive(Debug)]
 // RcPtr because we may want to substitute
 pub enum Term {
@@ -84,37 +86,40 @@ impl Definition {
     fn new_from_definition<'a>(
         ctx: &SyntaxContext<'a>,
         tree: &Ptr<ParseTree<'_>>,
-    ) -> Results<'a, RcPtr<Self>> {
-        use ariadne::*;
+    ) -> Option<RcPtr<Self>> {
         match tree.data.as_ref() {
             ParseTree::Import(_) => {
-                let report = ctx
-                    .init_warning(tree.location.start)
-                    .with_message("unsupported feature")
-                    .with_label(
-                        Label::new((ctx.source_name, tree.location.clone()))
-                            .with_color(Color::Yellow)
-                            .with_message("import is not supported and will be ignored"),
-                    )
-                    .finish();
-                (None, vec![report]).into()
+                ctx.warning(tree.location.start, |builer| {
+                    builer
+                        .with_message("unsupported feature")
+                        .with_label(
+                            Label::new((ctx.source_name, tree.location.clone()))
+                                .with_color(Color::Yellow)
+                                .with_message("import is not supported and will be ignored"),
+                        )
+                        .finish()
+                });
+                None
             }
             ParseTree::TypeDecl { .. } => {
-                let report = ctx
-                    .init_warning(tree.location.start)
-                    .with_message("unsupported feature")
-                    .with_label(
-                        Label::new((ctx.source_name, tree.location.clone()))
-                            .with_color(Color::Yellow)
-                            .with_message("custom data type is not supported and will be ignored"),
-                    )
-                    .finish();
-                (None, vec![report]).into()
+                ctx.warning(tree.location.start, |builder| {
+                    builder
+                        .with_message("unsupported feature")
+                        .with_label(
+                            Label::new((ctx.source_name, tree.location.clone()))
+                                .with_color(Color::Yellow)
+                                .with_message(
+                                    "custom data type is not supported and will be ignored",
+                                ),
+                        )
+                        .finish()
+                });
+                None
             }
-            ParseTree::FuncDecl { name, r#type } => {
+            ParseTree::FuncDecl { .. } => {
                 todo!()
             }
-            ParseTree::FuncDefine { name, params, body } => {
+            ParseTree::FuncDefine { .. } => {
                 todo!()
             }
             _ => assert_unreachable!(),
@@ -125,123 +130,19 @@ impl Definition {
         source_name: &'a str,
         source: &'a str,
         tree: &Ptr<ParseTree<'_>>,
-    ) -> Results<'a, Vec<RcPtr<Self>>> {
+    ) -> (Vec<RcPtr<Self>>, Vec<Report<NamedSpan<'a>>>) {
         match tree.data.as_ref() {
             ParseTree::Module { definitions, .. } => {
-                let mut report = Vec::new();
                 let mut translated = Vec::new();
                 let mut ctx = SyntaxContext::new(source_name, source);
                 for i in definitions {
-                    let mut inner = Self::new_from_definition(&mut ctx, i);
-                    inner.tree.map(|x| translated.push(x));
-                    report.append(&mut inner.reports);
+                    if let Some(x) = Self::new_from_definition(&mut ctx, i) {
+                        translated.push(x);
+                    }
                 }
-                (Some(translated), report).into()
+                (translated, ctx.take_reports())
             }
             _ => assert_unreachable!(),
-        }
-    }
-}
-
-struct Results<'a, T> {
-    tree: Option<T>,
-    reports: Vec<Report<(&'a str, std::ops::Range<usize>)>>,
-}
-
-impl<'a, T> From<(Option<T>, Vec<Report<(&'a str, Range<usize>)>>)> for Results<'a, T> {
-    fn from(value: (Option<T>, Vec<Report<(&'a str, Range<usize>)>>)) -> Self {
-        Results {
-            tree: value.0,
-            reports: value.1,
-        }
-    }
-}
-
-impl<'a, T> From<Option<T>> for Results<'a, T> {
-    fn from(value: Option<T>) -> Self {
-        Results {
-            tree: value,
-            reports: Vec::new(),
-        }
-    }
-}
-
-impl<'a, T> From<RcPtr<T>> for Results<'a, RcPtr<T>> {
-    fn from(value: RcPtr<T>) -> Self {
-        Results {
-            tree: Some(value),
-            reports: Vec::new(),
-        }
-    }
-}
-
-impl<'a, T> From<Vec<Report<(&'a str, Range<usize>)>>> for Results<'a, T> {
-    fn from(value: Vec<Report<(&'a str, Range<usize>)>>) -> Self {
-        Results {
-            tree: None,
-            reports: value,
-        }
-    }
-}
-
-impl<'a, T> From<Report<(&'a str, Range<usize>)>> for Results<'a, T> {
-    fn from(value: Report<(&'a str, Range<usize>)>) -> Self {
-        Results {
-            tree: None,
-            reports: vec![value],
-        }
-    }
-}
-
-impl<'a, T> Results<'a, T> {
-    fn to_tuple(self) -> (Option<T>, Vec<Report<(&'a str, Range<usize>)>>) {
-        (self.tree, self.reports)
-    }
-    fn and_then_optional<F>(mut self, f: F) -> Self
-    where
-        F: FnOnce(Option<T>) -> Self,
-    {
-        let mut results = f(self.tree);
-        results.reports.append(&mut self.reports);
-        results
-    }
-    fn and_then_mandatory<F>(mut self, f: F) -> Self
-    where
-        F: FnOnce(T) -> Self,
-    {
-        match self.tree.map(f) {
-            Some(mut results) => {
-                results.reports.append(&mut self.reports);
-                results
-            }
-            None => (None, self.reports).into(),
-        }
-    }
-    fn map_optional<F>(self, f: F) -> Self
-    where
-        F: FnOnce(Option<T>) -> Option<T>,
-    {
-        Results {
-            tree: f(self.tree),
-            ..self
-        }
-    }
-    fn and_then_inside_optional<F>(self, f: F) -> Self
-    where
-        F: FnOnce(T) -> Option<T>,
-    {
-        Results {
-            tree: self.tree.and_then(f),
-            ..self
-        }
-    }
-    fn map_inside_optional<F>(self, f: F) -> Self
-    where
-        F: FnOnce(T) -> T,
-    {
-        Results {
-            tree: self.tree.map(f),
-            ..self
         }
     }
 }
@@ -251,6 +152,7 @@ struct SyntaxContext<'a> {
     source: &'a str,
     variables: UnsafeCell<HashMap<&'a str, Name>>,
     fresh_counter: Cell<usize>,
+    reports: UnsafeCell<Vec<Report<NamedSpan<'a>>>>,
 }
 
 struct Guard<'src, 'ctx> {
@@ -265,20 +167,39 @@ impl<'a> SyntaxContext<'a> {
             source,
             variables: UnsafeCell::new(HashMap::new()),
             fresh_counter: Cell::new(0),
+            reports: UnsafeCell::new(Vec::new()),
         }
     }
-    fn init_error(
-        &self,
-        offset: usize,
-    ) -> ariadne::ReportBuilder<(&'a str, std::ops::Range<usize>)> {
-        Report::build(ariadne::ReportKind::Error, self.source_name, offset)
+    fn add_report(&self, report: Report<NamedSpan<'a>>) {
+        unsafe { (*self.reports.get()).push(report) }
     }
-    fn init_warning(
-        &self,
-        offset: usize,
-    ) -> ariadne::ReportBuilder<(&'a str, std::ops::Range<usize>)> {
-        Report::build(ariadne::ReportKind::Warning, self.source_name, offset)
+    fn reports(&self) -> &[Report<NamedSpan<'a>>] {
+        unsafe { (*self.reports.get()).as_slice() }
     }
+    fn take_reports(self) -> Vec<Report<NamedSpan<'a>>> {
+        unsafe { self.reports.into_inner() }
+    }
+    fn error<F>(&self, offset: usize, f: F)
+    where
+        F: FnOnce(ReportBuilder<NamedSpan<'a>>) -> Report<NamedSpan<'a>>,
+    {
+        self.add_report(f(Report::build(
+            ariadne::ReportKind::Error,
+            self.source_name,
+            offset,
+        )))
+    }
+    fn warning<F>(&self, offset: usize, f: F)
+    where
+        F: FnOnce(ReportBuilder<NamedSpan<'a>>) -> Report<NamedSpan<'a>>,
+    {
+        self.add_report(f(Report::build(
+            ariadne::ReportKind::Warning,
+            self.source_name,
+            offset,
+        )))
+    }
+
     fn get_variable(&self, name: &str) -> Option<Name> {
         unsafe {
             let map = &*self.variables.get();
@@ -319,30 +240,28 @@ impl Term {
     fn new_from_type<'a>(
         ctx: &SyntaxContext<'a>,
         tree: &Ptr<ParseTree<'_>>,
-    ) -> Results<'a, RcPtr<Self>> {
+    ) -> Option<RcPtr<Self>> {
         todo!()
     }
 
     fn new_from_parameter<'a>(
         ctx: &SyntaxContext<'a>,
         tree: &Ptr<ParseTree<'a>>,
-    ) -> Results<'a, Option<&'a str>> {
+    ) -> Option<&'a str> {
         match tree.data.as_ref() {
             ParseTree::Parameter { name, implicit } => {
                 let name = name.get_literal();
-                let mut reports = Vec::new();
                 if *implicit {
-                    let report = ctx.init_warning(tree.location.start)
-                    .with_message("unsupported feature")
-                    .with_label(ariadne::Label::new((ctx.source_name, tree.location.clone()))
-                    .with_color(Color::Yellow)
-                    .with_message(format!("implicit variable not supported, `{}` will be treated as explicit variable", name)))
-                    .finish();
-                    reports.push(report);
+                    ctx.warning(tree.location.start, |builder|
+                        builder.with_message("unsupported feature")
+                        .with_label(Label::new((ctx.source_name, tree.location.clone()))
+                        .with_color(Color::Yellow)
+                        .with_message(format!("implicit variable not supported, `{}` will be treated as explicit variable", name)))
+                        .finish());
                 }
-                (Some(Some(name)), reports).into()
+                Some(name)
             }
-            ParseTree::Underscore => Some(None).into(),
+            ParseTree::Underscore => None,
             _ => assert_unreachable!(),
         }
     }
@@ -350,12 +269,12 @@ impl Term {
     fn new_from_expr<'a>(
         ctx: &SyntaxContext<'a>,
         tree: &Ptr<ParseTree<'a>>,
-    ) -> Results<'a, RcPtr<Self>> {
+    ) -> Option<RcPtr<Self>> {
         let location = tree.location.clone();
         match tree.data.as_ref() {
             ParseTree::Lambda { params, body } => Term::new_from_params_and_body(ctx, params, body),
             ParseTree::ConstructorRef(name) => match name.get_literal() {
-                "Unit'" => RcPtr::new(location, Term::UnitIntro).into(),
+                "Unit'" => Some(RcPtr::new(location, Term::UnitIntro)),
                 "Pair" => {
                     let a = ctx.fresh();
                     let b = ctx.fresh();
@@ -364,89 +283,78 @@ impl Term {
                     let sigma = RcPtr::new(location.clone(), Term::SigmaIntro(var_a, var_b));
                     let lambda = RcPtr::new(location.clone(), Term::Lam(Some(b), sigma));
                     let lambda = RcPtr::new(location, Term::Lam(Some(a), lambda));
-                    lambda.into()
+                    Some(lambda)
                 }
-                "True" => RcPtr::new(location, Term::BoolIntro(true)).into(),
-                "False" => RcPtr::new(location, Term::BoolIntro(false)).into(),
+                "True" => Some(RcPtr::new(location, Term::BoolIntro(true))),
+                "False" => Some(RcPtr::new(location, Term::BoolIntro(false))),
                 lit => {
-                    let report = ctx
-                        .init_error(location.start)
-                        .with_message("unsupported feature")
-                        .with_label(
-                            ariadne::Label::new((ctx.source_name, location.clone()))
-                                .with_color(Color::Red)
-                                .with_message(format!("custom construct {} is not supported", lit)),
-                        )
-                        .finish();
-                    report.into()
+                    ctx.error(location.start, |builder| {
+                        builder
+                            .with_message("unsupported feature")
+                            .with_label(
+                                ariadne::Label::new((ctx.source_name, location.clone()))
+                                    .with_color(Color::Red)
+                                    .with_message(format!(
+                                        "custom construct {} is not supported",
+                                        lit
+                                    )),
+                            )
+                            .finish()
+                    });
+                    None
                 }
             },
-            ParseTree::Let { var, binding, body } => Term::new_from_expr(ctx, binding)
-                .and_then_optional(|mut binding| match var.data.as_ref() {
+            ParseTree::Let { var, binding, body } => {
+                let mut binding = Term::new_from_expr(ctx, binding);
+                match var.data.as_ref() {
                     ParseTree::AnnotableVariable { name, annotation } => {
                         let (name, _guard) = ctx.push_variable(name.get_literal());
-                        Term::new_from_expr(ctx, body).and_then_optional(|body| {
-                            let mut reports = Vec::new();
-                            if let Some(ann) = annotation {
-                                let (ann, ann_reports) = Term::new_from_type(ctx, ann).to_tuple();
-                                reports = ann_reports;
-                                binding = binding.and_then(move |binding| {
-                                    ann.map(|ann| {
-                                        RcPtr::new(
-                                            binding.location.start..ann.location.end,
-                                            Term::Ann(binding, ann),
-                                        )
-                                    })
-                                });
-                            }
-                            let expr = binding.and_then(move |binding| {
-                                body.map(move |body| {
+                        let body = Term::new_from_expr(ctx, body);
+                        if let Some(ann) = annotation {
+                            let ann = Term::new_from_type(ctx, ann);
+                            binding = binding.and_then(move |binding| {
+                                ann.map(|ann| {
                                     RcPtr::new(
-                                        tree.location.clone(),
-                                        Term::Let(name, binding, body),
+                                        binding.location.start..ann.location.end,
+                                        Term::Ann(binding, ann),
                                     )
                                 })
                             });
-                            (expr, reports).into()
+                        }
+                        binding.and_then(move |binding| {
+                            body.map(move |body| {
+                                RcPtr::new(tree.location.clone(), Term::Let(name, binding, body))
+                            })
                         })
                     }
                     _ => assert_unreachable!(),
-                }),
-            ParseTree::Variable(_) => Term::new_from_variable(ctx, tree),
-            ParseTree::FuncApply { func, args } => Term::new_from_expr(ctx, func)
-                .and_then_optional(|func| {
-                    let mut reports = Vec::new();
-                    let mut translated_args = Some(Vec::new());
-                    for i in args.iter() {
-                        let (arg, mut arg_reports) = Term::new_from_expr(ctx, i).to_tuple();
-                        reports.append(&mut arg_reports);
-                        translated_args = translated_args.and_then(move |mut x| {
-                            arg.map(|arg| {
-                                x.push(arg);
-                                x
-                            })
-                        });
-                    }
-                    let apply = func
-                        .and_then(move |f| translated_args.map(move |args| (f, args)))
-                        .and_then(move |(f, args)| {
-                            let mut res = Some(f);
-                            for i in args.into_iter() {
-                                res = res.map(move |tree: RcPtr<Term>| {
-                                    RcPtr::new(
-                                        tree.location.start..i.location.end,
-                                        Term::App(tree, i),
-                                    )
-                                });
-                            }
-                            res
-                        });
-                    (apply, reports).into()
-                }),
-            ParseTree::TrustMe => {
-                let term = RcPtr::new(location, Term::TrustMe);
-                term.into()
+                }
             }
+            ParseTree::Variable(_) => Term::new_from_variable(ctx, tree),
+            ParseTree::FuncApply { func, args } => {
+                let func = Term::new_from_expr(ctx, func);
+                let mut translated_args = Some(Vec::new());
+                for i in args.iter() {
+                    let arg = Term::new_from_expr(ctx, i);
+                    translated_args = translated_args.and_then(move |mut x| {
+                        arg.map(|arg| {
+                            x.push(arg);
+                            x
+                        })
+                    });
+                }
+                func.and_then(move |f| translated_args.map(move |args| (f, args)))
+                    .and_then(move |(f, args)| {
+                        let mut res = Some(f);
+                        for i in args.into_iter() {
+                            res = res.map(move |tree: RcPtr<Term>| {
+                                RcPtr::new(tree.location.start..i.location.end, Term::App(tree, i))
+                            });
+                        }
+                        res
+                    })
+            }
+            ParseTree::TrustMe => Some(RcPtr::new(location, Term::TrustMe)),
             _ => assert_unreachable!(),
         }
     }
@@ -455,36 +363,29 @@ impl Term {
         ctx: &SyntaxContext<'a>,
         params: &Vec<Ptr<ParseTree<'a>>>,
         body: &Ptr<ParseTree<'a>>,
-    ) -> Results<'a, RcPtr<Self>> {
+    ) -> Option<RcPtr<Self>> {
         let mut guards = Vec::new();
-        let mut reports = Vec::new();
         for i in params.iter().rev() {
-            let (name, mut report) = Term::new_from_parameter(ctx, i).to_tuple();
-            reports.append(&mut report);
-            if let Some(Some(name)) = name {
+            let name = Term::new_from_parameter(ctx, i);
+            if let Some(name) = name {
                 guards.push((i.location.clone(), Some(ctx.push_variable(name))));
             } else {
                 guards.push((i.location.clone(), None));
             }
         }
-        let (expr, mut report) = Term::new_from_expr(ctx, body).to_tuple();
-        reports.append(&mut report);
-
-        if let Some(mut expr) = expr {
+        Term::new_from_expr(ctx, body).map(|mut expr| {
             for mut i in guards.into_iter() {
                 let name = i.1.take().map(|x| x.0);
                 expr = RcPtr::new(i.0.start..expr.location.end, Term::Lam(name, expr));
             }
-            (Some(expr), reports).into()
-        } else {
-            (None, reports).into()
-        }
+            expr
+        })
     }
 
     fn new_from_function_definition<'a>(
         ctx: &SyntaxContext<'a>,
         tree: &Ptr<ParseTree<'a>>,
-    ) -> Results<'a, RcPtr<Self>> {
+    ) -> Option<RcPtr<Self>> {
         match tree.data.as_ref() {
             ParseTree::FuncDefine { params, body, .. } => {
                 Term::new_from_params_and_body(ctx, params, body)
@@ -496,24 +397,7 @@ impl Term {
     fn new_from_variable<'a>(
         ctx: &SyntaxContext<'a>,
         tree: &Ptr<ParseTree<'a>>,
-    ) -> Results<'a, RcPtr<Self>> {
-        fn unresolved_var<'a>(
-            ctx: &SyntaxContext<'a>,
-            tree: &Ptr<ParseTree<'a>>,
-            name: &Ptr<ParseTree<'a>>,
-        ) -> ariadne::Report<(&'a str, std::ops::Range<usize>)> {
-            ctx.init_error(tree.location.start)
-                .with_message("unresolved variable")
-                .with_label(
-                    ariadne::Label::new((ctx.source_name, name.location.clone()))
-                        .with_color(ariadne::Color::Red)
-                        .with_message(format!(
-                            "variable {} cannot be resolved within scope",
-                            name.get_literal()
-                        )),
-                )
-                .finish()
-        }
+    ) -> Option<RcPtr<Self>> {
         match tree.data.as_ref() {
             ParseTree::Variable(name) => {
                 let literal = name.get_literal();
@@ -523,9 +407,22 @@ impl Term {
                         let data = Term::Variable(var);
                         RcPtr::new(location, data)
                     };
-                    (Some(term), Vec::new()).into()
+                    Some(term)
                 } else {
-                    (None, vec![unresolved_var(ctx, tree, name)]).into()
+                    ctx.error(tree.location.start, |builder| {
+                        builder
+                            .with_message("unresolved variable")
+                            .with_label(
+                                ariadne::Label::new((ctx.source_name, name.location.clone()))
+                                    .with_color(ariadne::Color::Red)
+                                    .with_message(format!(
+                                        "variable {} cannot be resolved within scope",
+                                        name.get_literal()
+                                    )),
+                            )
+                            .finish()
+                    });
+                    None
                 }
             }
             _ => assert_unreachable!(),
@@ -553,8 +450,8 @@ fn test() {
     }
 "#;
     let parse_tree = grammar::syntactic::parse(source).0.unwrap();
-    let module = Definition::new_from_module("source.txt", source, &parse_tree);
-    for i in module.reports.iter() {
+    let (module, reports) = Definition::new_from_module("source.txt", source, &parse_tree);
+    for i in reports.iter() {
         i.eprint(("source.txt", ariadne::Source::from(source)))
             .unwrap();
     }
@@ -572,10 +469,10 @@ fn test_2() {
     let ctx = SyntaxContext::new("source.txt", source);
     if let ParseTree::Module { definitions, .. } = parse_tree.data.as_ref() {
         let func_def = Term::new_from_function_definition(&ctx, &definitions[0]);
-        for i in func_def.reports.iter() {
+        for i in ctx.reports().iter() {
             i.eprint(("source.txt", ariadne::Source::from(source)))
                 .unwrap();
         }
-        println!("{:?}", func_def.tree)
+        println!("{:?}", func_def.unwrap())
     }
 }
