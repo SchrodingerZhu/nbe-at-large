@@ -431,7 +431,7 @@ impl Term {
                                 ariadne::Label::new((ctx.source_name, location.clone()))
                                     .with_color(Color::Red)
                                     .with_message(format!(
-                                        "custom construct {} is not supported",
+                                        "custom constructor {} is not supported",
                                         lit
                                     )),
                             )
