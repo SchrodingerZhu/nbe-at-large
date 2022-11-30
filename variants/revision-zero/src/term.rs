@@ -368,7 +368,81 @@ impl BuiltinType for BuiltinBool {
         if rules.len() != 2 {
             return Ok(None);
         }
-        todo!()
+        fn basic_info<'a, 'src: 'a>(
+            tree: &'a ParseTree<'src>,
+        ) -> (&'src str, usize, &'a Ptr<ParseTree<'src>>) {
+            match tree {
+                ParseTree::PatternRule {
+                    constructor,
+                    variables,
+                    body,
+                } => (constructor.get_literal(), variables.len(), body),
+                _ => assert_unreachable!(),
+            }
+        }
+        let info = [
+            basic_info(rules[0].data.as_ref()),
+            basic_info(rules[1].data.as_ref()),
+        ];
+        match (info[0], info[1]) {
+            (("True", 0, true_body), ("False", 0, false_body))
+            | (("False", 0, false_body), ("True", 0, true_body)) => {
+                let r#true = Term::new_from_expr(ctx, true_body);
+                let r#false = Term::new_from_expr(ctx, false_body);
+                let branches =
+                    r#true.and_then(move |r#true| r#false.map(move |r#false| (r#true, r#false)));
+                match branches {
+                    None => Err(()),
+                    Some(branches) => Ok(Some(branches)),
+                }
+            }
+            (("True", i, _), ("False", j, _)) | (("False", i, _), ("True", j, _)) => {
+                let report_error = |idx: usize| {
+                    ctx.error(rules[idx].location.start, |builder| {
+                        builder
+                            .with_message("Illegal elimination for Bool type")
+                            .with_label(
+                                Label::new((ctx.source_name, rules[idx].location.clone()))
+                                    .with_color(Color::Red)
+                                    .with_message(format!(
+                                        "unexpected parameter(s) for {} constructor",
+                                        info[idx].0
+                                    )),
+                            )
+                            .finish()
+                    })
+                };
+                if i > 0 {
+                    report_error(0);
+                }
+                if j > 0 {
+                    report_error(1);
+                }
+                Err(())
+            }
+            (("True", _, _), ("True", _, _)) | (("False", _, _), ("False", _, _)) => {
+                ctx.error(rules[0].location.start, |builder| {
+                    builder
+                        .with_message("Overlapped patterns")
+                        .with_label(
+                            Label::new((ctx.source_name, rules[0].location.clone()))
+                                .with_color(Color::Red)
+                                .with_message(format!(
+                                    "the pattern {} is already covered here",
+                                    info[0].0
+                                )),
+                        )
+                        .with_label(
+                            Label::new((ctx.source_name, rules[1].location.clone()))
+                                .with_color(Color::Red)
+                                .with_message("...however, it appears again later"),
+                        )
+                        .finish()
+                });
+                Err(())
+            }
+            _ => Ok(None),
+        }
     }
 }
 
@@ -712,6 +786,29 @@ fn test_match_pair() {
     module Test
     test x = case x of {
         Pair l _ -> l;
+    } 
+"#;
+    let parse_tree = grammar::syntactic::parse(source).1;
+    eprintln!("{:#?}", parse_tree);
+    let parse_tree = grammar::syntactic::parse(source).0.unwrap();
+    let ctx = SyntaxContext::new("source.txt", source);
+    if let ParseTree::Module { definitions, .. } = parse_tree.data.as_ref() {
+        let func_def = Term::new_from_function_definition(&ctx, &definitions[0]);
+        for i in ctx.reports().iter() {
+            i.eprint(("source.txt", ariadne::Source::from(source)))
+                .unwrap();
+        }
+        println!("{:?}", func_def.unwrap())
+    }
+}
+
+#[test]
+fn test_match_bool() {
+    let source = r#"
+    module Test
+    test x = case x of {
+        True -> !!;
+        False -> !!;
     } 
 "#;
     let parse_tree = grammar::syntactic::parse(source).1;
