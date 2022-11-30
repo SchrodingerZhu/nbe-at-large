@@ -154,11 +154,11 @@ mod implementation {
             })
     }
 
-    fn parse_function_decl<'a>(r#type: impl Parse<'a>) -> impl Parse<'a> {
+    fn parse_function_decl<'a>(expr: impl Parse<'a>) -> impl Parse<'a> {
         let name = parse_literal(Token::SmallCase);
         let consume_colon = just(Token::Colon);
         name.then_ignore(consume_colon)
-            .then(r#type)
+            .then(expr)
             .map_with_span(|(name, r#type), span| Ptr::new(span.span, FuncDecl { name, r#type }))
     }
 
@@ -181,13 +181,9 @@ mod implementation {
     }
 
     fn parse_definitions<'a>() -> impl Parse<'a, Vec<Ptr<ParseTree<'a>>>> {
-        let r#type = || {
-            let expr = parse_expr();
-            parse_type(expr)
-        };
         parse_import()
-            .or(parse_type_decl(r#type()))
-            .or(parse_function_decl(r#type()))
+            .or(parse_type_decl(parse_expr()))
+            .or(parse_function_decl(parse_expr()))
             .or(parse_function_def(parse_expr()))
             .repeated()
     }
@@ -196,11 +192,11 @@ mod implementation {
     //      Nil : List a;
     //      Cons : a -> List;
     // }
-    fn parse_type_former<'a>(r#type: impl Parse<'a>) -> impl Parse<'a> {
+    fn parse_type_former<'a>(expr: impl Parse<'a>) -> impl Parse<'a> {
         let consume_data = just(Token::Data);
         let name = parse_literal(Token::BigCase);
-        let telescopes = parse_telescope(true, r#type.clone())
-            .or(parse_telescope(false, r#type.clone()))
+        let telescopes = parse_telescope(true, expr.clone())
+            .or(parse_telescope(false, expr.clone()))
             .repeated();
         consume_data
             .ignore_then(name)
@@ -208,21 +204,21 @@ mod implementation {
             .map_with_span(|(name, params), span| Ptr::new(span.span, TypeFormer { name, params }))
     }
 
-    fn parse_constructor<'a>(r#type: impl Parse<'a>) -> impl Parse<'a> {
+    fn parse_constructor<'a>(expr: impl Parse<'a>) -> impl Parse<'a> {
         let name = parse_literal(Token::BigCase);
         let consume_colon = just(Token::Colon);
         let consume_semicolon = just(Token::SemiColon);
         name.then_ignore(consume_colon)
-            .then(r#type)
+            .then(expr)
             .then_ignore(consume_semicolon)
             .map_with_span(|(name, r#type), span| Ptr::new(span.span, Constructor { name, r#type }))
     }
 
-    fn parse_type_decl<'a>(r#type: impl Parse<'a>) -> impl Parse<'a> {
-        let former = parse_type_former(r#type.clone());
+    fn parse_type_decl<'a>(expr: impl Parse<'a>) -> impl Parse<'a> {
+        let former = parse_type_former(expr.clone());
         let consume_equal = just(Token::Equal);
         let consume_lbrace = just(Token::LBrace);
-        let constructors = parse_constructor(r#type).repeated();
+        let constructors = parse_constructor(expr).repeated();
         let consume_rbrace = just(Token::RBrace);
         former
             .then_ignore(consume_equal)
@@ -248,20 +244,6 @@ mod implementation {
             .map_with_span(|name, span| Ptr::new(span.span, Import(name)))
     }
 
-    // "Type"
-    // Arrow
-    // "type expr"
-
-    fn parse_type<'a>(expr: impl Parse<'a>) -> impl Parse<'a> {
-        let type_literal = just(Token::Type)
-            .map_with_span(|_, span: SrcSpan<'a>| Ptr::new(span.span.clone(), Type));
-        recursive(move |r#type| {
-            type_literal
-                .or(parse_arrow_expr(expr.clone(), r#type))
-                .or(parse_type_expr(expr))
-        })
-    }
-
     fn parse_variable<'a>() -> impl Parse<'a> {
         let name = parse_literal(Token::SmallCase);
         name.map_with_span(|name, span| Ptr::new(span.span, Variable(name)))
@@ -274,16 +256,15 @@ mod implementation {
             .ignore_then(name.map_with_span(|name, span| Ptr::new(span.span, ConstructorRef(name))))
     }
 
-    fn parse_simple_type_expr<'a>(expr: impl Parse<'a>, r#type: impl Parse<'a>) -> impl Parse<'a> {
-        parse_type_expr(expr)
-            .or(parse_variable())
-            .or(parse_telescope(true, r#type.clone()))
-            .or(parse_telescope(false, r#type))
+    fn parse_simple_type_expr<'a>(expr: impl Parse<'a>) -> impl Parse<'a> {
+        parse_arrow_expr_primitives(expr.clone())
+            .or(parse_telescope(true, expr.clone()))
+            .or(parse_telescope(false, expr))
     }
 
-    fn parse_arrow_expr<'a>(expr: impl Parse<'a>, r#type: impl Parse<'a>) -> impl Parse<'a> {
+    fn parse_arrow_expr<'a>(expr: impl Parse<'a>) -> impl Parse<'a> {
         recursive(|arrow| {
-            let primitive = parse_simple_type_expr(expr, r#type);
+            let primitive = parse_simple_type_expr(expr);
             let delimited_arrow = arrow.delimited_by(just(Token::LParen), just(Token::RParen));
             primitive
                 .or(delimited_arrow)
@@ -321,7 +302,7 @@ mod implementation {
         })
     }
 
-    fn parse_telescope<'a>(implicit: bool, r#type: impl Parse<'a>) -> impl Parse<'a> {
+    fn parse_telescope<'a>(implicit: bool, expr: impl Parse<'a>) -> impl Parse<'a> {
         let consume_lparen = just(if implicit {
             Token::LSquare
         } else {
@@ -338,7 +319,7 @@ mod implementation {
         consume_lparen
             .ignore_then(name)
             .then_ignore(consume_colon)
-            .then(r#type)
+            .then(expr)
             .then_ignore(consume_rparen)
             .map_with_span(move |(name, annotation), span| {
                 Ptr::new(
@@ -352,6 +333,32 @@ mod implementation {
             })
     }
 
+    fn parse_arrow_expr_primitives<'a>(expr: impl Parse<'a>) -> impl Parse<'a> {
+        // variable
+        // function/constructor apply
+        // lambda
+        // pattern matching
+        // let in
+        // type expr
+        // trustme
+        // arrow
+        // Type
+        let trustme =
+            just(Token::TrustMe).map_with_span(|_, span: SrcSpan<'a>| Ptr::new(span.span, TrustMe));
+        let r#type =
+            just(Token::Type).map_with_span(|_, span: SrcSpan<'a>| Ptr::new(span.span, Type));
+
+        parse_variable()
+            .or(parse_constructor_ref())
+            .or(trustme)
+            .or(parse_function_apply(expr.clone()))
+            .or(parse_lambda(expr.clone()))
+            .or(parse_pattern_match(expr.clone()))
+            .or(parse_let_in_expr(expr.clone()))
+            .or(r#type)
+            .or(parse_type_expr(expr.clone()))
+    }
+
     fn parse_expr<'a>() -> impl Parse<'a> {
         // variable
         // function/constructor apply
@@ -360,17 +367,24 @@ mod implementation {
         // let in
         // type expr
         // trustme
+        // arrow
+        // Type
 
         recursive(|expr| {
             let trustme = just(Token::TrustMe)
                 .map_with_span(|_, span: SrcSpan<'a>| Ptr::new(span.span, TrustMe));
-            parse_variable()
+            let r#type =
+                just(Token::Type).map_with_span(|_, span: SrcSpan<'a>| Ptr::new(span.span, Type));
+            parse_arrow_expr(expr.clone())
                 .or(parse_constructor_ref())
                 .or(trustme)
                 .or(parse_function_apply(expr.clone()))
                 .or(parse_lambda(expr.clone()))
                 .or(parse_pattern_match(expr.clone()))
-                .or(parse_let_in_expr(expr.clone()).or(parse_type(expr)))
+                .or(parse_let_in_expr(expr.clone()))
+                .or(parse_variable())
+                .or(r#type)
+                .or(parse_type_expr(expr))
         })
     }
 
@@ -455,10 +469,8 @@ mod implementation {
                 .map(|x| Some(x))
                 .or(just(Token::Underscore).to(None))
         };
-        let annotated = name()
-            .then_ignore(consume_colon)
-            .then(parse_type(expr))
-            .map_with_span(|(name, annotation), span| {
+        let annotated = name().then_ignore(consume_colon).then(expr).map_with_span(
+            |(name, annotation), span| {
                 Ptr::new(
                     span.span,
                     AnnotableVariable {
@@ -466,7 +478,8 @@ mod implementation {
                         annotation: Some(annotation),
                     },
                 )
-            });
+            },
+        );
         let unannotated = {
             name().map_with_span(|name, span| {
                 Ptr::new(
@@ -530,7 +543,7 @@ mod implementation {
         let src = "
             module Test
             import Primitive
-            map : [a : Type] -> [b : Type] -> (a -> b) -> List<a> -> List<b> -> A
+            map : [a : Type] -> [b : Type] -> (a -> b) -> List<a> -> List<b> -> (let b = b in A<b>)
         ";
         let steam = crate::lexical::LexerStream::chumsky_stream(src);
         let parsed = parse_module().parse(steam);
