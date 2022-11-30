@@ -72,7 +72,7 @@ pub enum Term {
     BoolType,
     BoolIntro(bool),
     BoolElim(RcPtr<Self>, RcPtr<Self>, RcPtr<Self>),
-    SigmaType(RcPtr<Self>, Name, RcPtr<Self>),
+    SigmaType(RcPtr<Self>, Option<Name>, RcPtr<Self>),
     SigmaIntro(RcPtr<Self>, RcPtr<Self>),
     SigmaElim(Name, Name, RcPtr<Self>, RcPtr<Self>),
 }
