@@ -742,10 +742,26 @@ fn scan_module_definitions<'tree, 'src: 'tree>(
         }
     })
 }
+#[cfg(test)]
+mod test {
+    use super::Definition;
+    fn parse_from_source(source: &str) {
+        let parse_tree = grammar::syntactic::parse(source).1;
+        eprintln!("{:#?}", parse_tree);
+        let parse_tree = grammar::syntactic::parse(source).0.unwrap();
+        let definitions = Definition::new_from_module("source.txt", &parse_tree);
+        for i in definitions.1.iter() {
+            i.eprint(("source.txt", ariadne::Source::from(source)))
+                .unwrap();
+        }
+        {
+            println!("{:#?}", definitions.0)
+        }
+    }
 
-#[test]
-fn test_func_def() {
-    let source = r#"
+    #[test]
+    fn test_func_def() {
+        let source = r#"
     module Test
 
     myType : Type
@@ -754,125 +770,66 @@ fn test_func_def() {
     test : myType -> myType -> `Sigma myType, myType
     test x = let u = lambda y . (@Pair x y) in u
 "#;
-    let parse_tree = grammar::syntactic::parse(source).1;
-    eprintln!("{:#?}", parse_tree);
-    let parse_tree = grammar::syntactic::parse(source).0.unwrap();
-    let definitions = Definition::new_from_module("source.txt", &parse_tree);
-    for i in definitions.1.iter() {
-        i.eprint(("source.txt", ariadne::Source::from(source)))
-            .unwrap();
+        parse_from_source(source);
     }
-    {
-        println!("{:#?}", definitions.0)
-    }
-}
 
-#[test]
-fn test_match_unit() {
-    let source = r#"
+    #[test]
+    fn test_match_unit() {
+        let source = r#"
     module Test
+    test : Unit -> Bool
     test x = case x of {
         Unit -> !!;
     } 
 "#;
-    let parse_tree = grammar::syntactic::parse(source).1;
-    eprintln!("{:#?}", parse_tree);
-    let parse_tree = grammar::syntactic::parse(source).0.unwrap();
-    let ctx = SyntaxContext::new("source.txt");
-    if let ParseTree::Module { definitions, .. } = parse_tree.data.as_ref() {
-        let func_def = Term::new_from_function_definition(&ctx, &definitions[0]);
-        for i in ctx.reports().iter() {
-            i.eprint(("source.txt", ariadne::Source::from(source)))
-                .unwrap();
-        }
-        println!("{:?}", func_def.unwrap())
+        parse_from_source(source);
     }
-}
 
-#[test]
-fn test_match_bottom() {
-    let source = r#"
+    #[test]
+    fn test_match_bottom() {
+        let source = r#"
     module Test
+    test : Bottom -> Bool
     test x = case x of {} 
 "#;
-    let parse_tree = grammar::syntactic::parse(source).1;
-    eprintln!("{:#?}", parse_tree);
-    let parse_tree = grammar::syntactic::parse(source).0.unwrap();
-    let ctx = SyntaxContext::new("source.txt");
-    if let ParseTree::Module { definitions, .. } = parse_tree.data.as_ref() {
-        let func_def = Term::new_from_function_definition(&ctx, &definitions[0]);
-        for i in ctx.reports().iter() {
-            i.eprint(("source.txt", ariadne::Source::from(source)))
-                .unwrap();
-        }
-        println!("{:?}", func_def.unwrap())
+        parse_from_source(source);
     }
-}
 
-#[test]
-fn test_match_pair() {
-    let source = r#"
+    #[test]
+    fn test_match_pair() {
+        let source = r#"
     module Test
+    test : `Sigma Bool, Bool -> Bool
     test x = case x of {
         Pair l _ -> l;
     } 
 "#;
-    let parse_tree = grammar::syntactic::parse(source).1;
-    eprintln!("{:#?}", parse_tree);
-    let parse_tree = grammar::syntactic::parse(source).0.unwrap();
-    let ctx = SyntaxContext::new("source.txt");
-    if let ParseTree::Module { definitions, .. } = parse_tree.data.as_ref() {
-        let func_def = Term::new_from_function_definition(&ctx, &definitions[0]);
-        for i in ctx.reports().iter() {
-            i.eprint(("source.txt", ariadne::Source::from(source)))
-                .unwrap();
-        }
-        println!("{:?}", func_def.unwrap())
+        parse_from_source(source);
     }
-}
 
-#[test]
-fn test_match_bool() {
-    let source = r#"
+    #[test]
+    fn test_match_bool() {
+        let source = r#"
     module Test
+    test : Bool -> Type
     test x = case x of {
-        True -> !!;
-        False -> !!;
+        True -> Bool;
+        False -> Unit;
     } 
 "#;
-    let parse_tree = grammar::syntactic::parse(source).1;
-    eprintln!("{:#?}", parse_tree);
-    let parse_tree = grammar::syntactic::parse(source).0.unwrap();
-    let ctx = SyntaxContext::new("source.txt");
-    if let ParseTree::Module { definitions, .. } = parse_tree.data.as_ref() {
-        let func_def = Term::new_from_function_definition(&ctx, &definitions[0]);
-        for i in ctx.reports().iter() {
-            i.eprint(("source.txt", ariadne::Source::from(source)))
-                .unwrap();
-        }
-        println!("{:?}", func_def.unwrap())
+        parse_from_source(source);
     }
-}
 
-#[test]
-fn test_type_level() {
-    let source = r#"
+    #[test]
+    fn test_type_level() {
+        let source = r#"
     module Test
+    test : (Type -> Bool -> Type) -> Bool -> Type
     test check x = case x of {
         True -> `Pi (i : Bool), let u : Type ~= (check u i) in u;
         False -> `Sigma (i : Bool), (check !! i);
     } 
 "#;
-    let parse_tree = grammar::syntactic::parse(source).1;
-    eprintln!("{:#?}", parse_tree);
-    let parse_tree = grammar::syntactic::parse(source).0.unwrap();
-    let ctx = SyntaxContext::new("source.txt");
-    if let ParseTree::Module { definitions, .. } = parse_tree.data.as_ref() {
-        let func_def = Term::new_from_function_definition(&ctx, &definitions[0]);
-        for i in ctx.reports().iter() {
-            i.eprint(("source.txt", ariadne::Source::from(source)))
-                .unwrap();
-        }
-        println!("{:?}", func_def.unwrap())
+        parse_from_source(source);
     }
 }
