@@ -1,4 +1,3 @@
-#![feature(adt_const_params)]
 #![feature(box_patterns)]
 mod builtin;
 mod term;

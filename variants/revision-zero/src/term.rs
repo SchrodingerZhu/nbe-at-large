@@ -1,6 +1,6 @@
 use crate::assert_unreachable;
 use crate::builtin::{BuiltinBool, BuiltinBottom, BuiltinPair, BuiltinType, BuiltinUnit};
-use ariadne::{Color, Label, Report, ReportBuilder, Span};
+use ariadne::{Color, Label, Report, ReportBuilder};
 use grammar::syntactic::{ParseTree, Ptr};
 use std::cell::{Cell, UnsafeCell};
 use std::collections::hash_map::Entry;
@@ -87,12 +87,11 @@ pub struct Definition {
 impl Definition {
     pub(crate) fn new_from_module<'a>(
         source_name: &'a str,
-        source: &'a str,
         tree: &Ptr<ParseTree<'a>>,
     ) -> (Vec<Definition>, Vec<Report<NamedSpan<'a>>>) {
         match tree.data.as_ref() {
             ParseTree::Module { definitions, .. } => {
-                let context = SyntaxContext::new(source_name, source);
+                let context = SyntaxContext::new(source_name);
                 let records = scan_module_definitions(&context, definitions.as_slice());
                 let mut global_guards = Vec::new();
                 let mut definitions = Vec::new();
@@ -125,7 +124,6 @@ impl Definition {
 
 pub(crate) struct SyntaxContext<'a> {
     pub source_name: &'a str,
-    source: &'a str,
     variables: UnsafeCell<HashMap<&'a str, Name>>,
     fresh_counter: Cell<usize>,
     reports: UnsafeCell<Vec<Report<NamedSpan<'a>>>>,
@@ -137,10 +135,9 @@ pub(crate) struct Guard<'src, 'ctx> {
 }
 
 impl<'a> SyntaxContext<'a> {
-    pub(crate) fn new(source_name: &'a str, source: &'a str) -> Self {
+    pub(crate) fn new(source_name: &'a str) -> Self {
         Self {
             source_name,
-            source,
             variables: UnsafeCell::new(HashMap::new()),
             fresh_counter: Cell::new(0),
             reports: UnsafeCell::new(Vec::new()),
@@ -153,7 +150,7 @@ impl<'a> SyntaxContext<'a> {
         unsafe { (*self.reports.get()).as_slice() }
     }
     pub(crate) fn take_reports(self) -> Vec<Report<NamedSpan<'a>>> {
-        unsafe { self.reports.into_inner() }
+        self.reports.into_inner()
     }
     pub(crate) fn error<F>(&self, offset: usize, f: F)
     where
@@ -584,7 +581,7 @@ fn test() {
     }
 "#;
     let parse_tree = grammar::syntactic::parse(source).0.unwrap();
-    let (_, reports) = Definition::new_from_module("source.txt", source, &parse_tree);
+    let (_, reports) = Definition::new_from_module("source.txt", &parse_tree);
     for i in reports.iter() {
         i.eprint(("source.txt", ariadne::Source::from(source)))
             .unwrap();
@@ -650,6 +647,7 @@ fn scan_module_definitions<'tree, 'src: 'tree>(
                                         )
                                         .finish()
                                 });
+                                success = false;
                             } else {
                                 record.0 = Some(r#type);
                             }
@@ -754,12 +752,12 @@ fn test_func_def() {
     myType = Bool
 
     test : myType -> myType -> `Sigma myType, myType
-    test x = let u = lambda y . (@Pair x y) in u 
+    test x = let u = lambda y . (@Pair x y) in u
 "#;
     let parse_tree = grammar::syntactic::parse(source).1;
     eprintln!("{:#?}", parse_tree);
     let parse_tree = grammar::syntactic::parse(source).0.unwrap();
-    let definitions = Definition::new_from_module("source.txt", source, &parse_tree);
+    let definitions = Definition::new_from_module("source.txt", &parse_tree);
     for i in definitions.1.iter() {
         i.eprint(("source.txt", ariadne::Source::from(source)))
             .unwrap();
@@ -780,7 +778,7 @@ fn test_match_unit() {
     let parse_tree = grammar::syntactic::parse(source).1;
     eprintln!("{:#?}", parse_tree);
     let parse_tree = grammar::syntactic::parse(source).0.unwrap();
-    let ctx = SyntaxContext::new("source.txt", source);
+    let ctx = SyntaxContext::new("source.txt");
     if let ParseTree::Module { definitions, .. } = parse_tree.data.as_ref() {
         let func_def = Term::new_from_function_definition(&ctx, &definitions[0]);
         for i in ctx.reports().iter() {
@@ -800,7 +798,7 @@ fn test_match_bottom() {
     let parse_tree = grammar::syntactic::parse(source).1;
     eprintln!("{:#?}", parse_tree);
     let parse_tree = grammar::syntactic::parse(source).0.unwrap();
-    let ctx = SyntaxContext::new("source.txt", source);
+    let ctx = SyntaxContext::new("source.txt");
     if let ParseTree::Module { definitions, .. } = parse_tree.data.as_ref() {
         let func_def = Term::new_from_function_definition(&ctx, &definitions[0]);
         for i in ctx.reports().iter() {
@@ -822,7 +820,7 @@ fn test_match_pair() {
     let parse_tree = grammar::syntactic::parse(source).1;
     eprintln!("{:#?}", parse_tree);
     let parse_tree = grammar::syntactic::parse(source).0.unwrap();
-    let ctx = SyntaxContext::new("source.txt", source);
+    let ctx = SyntaxContext::new("source.txt");
     if let ParseTree::Module { definitions, .. } = parse_tree.data.as_ref() {
         let func_def = Term::new_from_function_definition(&ctx, &definitions[0]);
         for i in ctx.reports().iter() {
@@ -845,7 +843,7 @@ fn test_match_bool() {
     let parse_tree = grammar::syntactic::parse(source).1;
     eprintln!("{:#?}", parse_tree);
     let parse_tree = grammar::syntactic::parse(source).0.unwrap();
-    let ctx = SyntaxContext::new("source.txt", source);
+    let ctx = SyntaxContext::new("source.txt");
     if let ParseTree::Module { definitions, .. } = parse_tree.data.as_ref() {
         let func_def = Term::new_from_function_definition(&ctx, &definitions[0]);
         for i in ctx.reports().iter() {
@@ -868,7 +866,7 @@ fn test_type_level() {
     let parse_tree = grammar::syntactic::parse(source).1;
     eprintln!("{:#?}", parse_tree);
     let parse_tree = grammar::syntactic::parse(source).0.unwrap();
-    let ctx = SyntaxContext::new("source.txt", source);
+    let ctx = SyntaxContext::new("source.txt");
     if let ParseTree::Module { definitions, .. } = parse_tree.data.as_ref() {
         let func_def = Term::new_from_function_definition(&ctx, &definitions[0]);
         for i in ctx.reports().iter() {
