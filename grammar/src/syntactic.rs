@@ -83,6 +83,7 @@ pub enum ParseTree<'a> {
         name: Ptr<Self>,
         params: Vec<Ptr<Self>>,
         body: Ptr<Self>,
+        recursive: bool,
     },
     FuncApply {
         func: Ptr<Self>,
@@ -109,6 +110,7 @@ pub enum ParseTree<'a> {
         var: Ptr<Self>,
         binding: Ptr<Self>,
         body: Ptr<Self>,
+        recursive: bool,
     },
     Lambda {
         params: Vec<Ptr<Self>>,
@@ -188,13 +190,22 @@ mod implementation {
     fn parse_function_def<'a>(expr: impl Parse<'a>) -> impl Parse<'a> {
         let name = parse_literal(Token::SmallCase);
         let params = parse_parameter().repeated();
-        let consume_equal = just(Token::Equal);
-        name.then(params)
-            .then_ignore(consume_equal)
-            .then(expr)
-            .map_with_span(|((name, params), body), span| {
-                Ptr::new(span.span, FuncDefine { name, params, body })
-            })
+        let equal = just(Token::Equal)
+            .to(false)
+            .or(just(Token::SimEqual).to(true));
+        name.then(params).then(equal).then(expr).map_with_span(
+            |(((name, params), recursive), body), span| {
+                Ptr::new(
+                    span.span,
+                    FuncDefine {
+                        name,
+                        params,
+                        body,
+                        recursive,
+                    },
+                )
+            },
+        )
     }
 
     fn parse_literal<'a>(token: Token) -> impl Parse<'a> {
@@ -464,16 +475,26 @@ mod implementation {
 
     fn parse_let_in_expr<'a>(expr: impl Parse<'a>) -> impl Parse<'a> {
         let consume_let = just(Token::Let);
-        let consume_equal = just(Token::Equal);
+        let equal = just(Token::Equal)
+            .to(false)
+            .or(just(Token::SimEqual).to(true));
         let consume_in = just(Token::In);
         consume_let
             .ignore_then(parse_annotable_variable(expr.clone()))
-            .then_ignore(consume_equal)
+            .then(equal)
             .then(expr.clone())
             .then_ignore(consume_in)
             .then(expr)
-            .map_with_span(|((var, binding), body), span| {
-                Ptr::new(span.span, Let { var, binding, body })
+            .map_with_span(|(((var, recursive), binding), body), span| {
+                Ptr::new(
+                    span.span,
+                    Let {
+                        var,
+                        binding,
+                        body,
+                        recursive,
+                    },
+                )
             })
     }
 

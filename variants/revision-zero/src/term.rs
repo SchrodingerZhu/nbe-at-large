@@ -507,15 +507,27 @@ impl Term {
                     None
                 }
             },
-            ParseTree::Let { var, binding, body } => {
-                let mut binding = Term::new_from_expr(ctx, binding);
+            ParseTree::Let {
+                var,
+                binding: binding_tree,
+                body,
+                recursive,
+            } => {
+                let mut binding = None;
+
                 match var.data.as_ref() {
                     ParseTree::AnnotableVariable { name, annotation } => {
+                        if !*recursive {
+                            binding = Term::new_from_expr(ctx, binding_tree);
+                        }
                         let (name, _guard) = name
                             .as_ref()
                             .map(|name| ctx.push_variable(name.get_literal()))
                             .map(|(x, y)| (Some(x), Some(y)))
                             .unwrap_or((None, None));
+                        if *recursive {
+                            binding = Term::new_from_expr(ctx, binding_tree);
+                        }
                         let body = Term::new_from_expr(ctx, body);
                         if let Some(ann) = annotation {
                             let ann = Term::new_from_expr(ctx, ann);
@@ -925,8 +937,8 @@ fn test_type_level() {
     let source = r#"
     module Test
     test check x = case x of {
-        True -> `Pi (i : Bool), (check i);
-        False -> `Sigma (i : Bool), (check i);
+        True -> `Pi (i : Bool), let u : Type ~= (check u i) in u;
+        False -> `Sigma (i : Bool), (check !! i);
     } 
 "#;
     let parse_tree = grammar::syntactic::parse(source).1;
