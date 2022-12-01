@@ -3,7 +3,7 @@ use std::cell::{Cell, UnsafeCell};
 use std::hash::{Hash, Hasher};
 use std::ops::Range;
 use std::{collections::HashMap, rc::Rc};
-
+use crate::builtin::{BuiltinBool, BuiltinBottom, BuiltinPair, BuiltinUnit, BuiltinType};
 use crate::assert_unreachable;
 use grammar::syntactic::{ParseTree, Ptr};
 #[derive(Clone, Debug)]
@@ -51,7 +51,7 @@ impl<T> std::ops::Deref for RcPtr<T> {
     }
 }
 
-type NamedSpan<'a> = (&'a str, std::ops::Range<usize>);
+type NamedSpan<'a> = (&'a str, Range<usize>);
 
 #[derive(Debug)]
 // RcPtr because we may want to substitute
@@ -83,7 +83,7 @@ pub enum Definition {
 }
 
 impl Definition {
-    fn new_from_definition<'a>(
+    pub(crate) fn new_from_definition<'a>(
         ctx: &SyntaxContext<'a>,
         tree: &Ptr<ParseTree<'_>>,
     ) -> Option<RcPtr<Self>> {
@@ -126,7 +126,7 @@ impl Definition {
         }
     }
 
-    fn new_from_module<'a>(
+    pub(crate) fn new_from_module<'a>(
         source_name: &'a str,
         source: &'a str,
         tree: &Ptr<ParseTree<'_>>,
@@ -147,21 +147,21 @@ impl Definition {
     }
 }
 
-struct SyntaxContext<'a> {
-    source_name: &'a str,
+pub(crate) struct SyntaxContext<'a> {
+    pub source_name: &'a str,
     source: &'a str,
     variables: UnsafeCell<HashMap<&'a str, Name>>,
     fresh_counter: Cell<usize>,
     reports: UnsafeCell<Vec<Report<NamedSpan<'a>>>>,
 }
 
-struct Guard<'src, 'ctx> {
+pub(crate) struct Guard<'src, 'ctx> {
     context: &'ctx SyntaxContext<'src>,
     replacement: Option<(&'src str, Name)>,
 }
 
 impl<'a> SyntaxContext<'a> {
-    fn new(source_name: &'a str, source: &'a str) -> Self {
+    pub(crate) fn new(source_name: &'a str, source: &'a str) -> Self {
         Self {
             source_name,
             source,
@@ -170,16 +170,16 @@ impl<'a> SyntaxContext<'a> {
             reports: UnsafeCell::new(Vec::new()),
         }
     }
-    fn add_report(&self, report: Report<NamedSpan<'a>>) {
+    pub(crate) fn add_report(&self, report: Report<NamedSpan<'a>>) {
         unsafe { (*self.reports.get()).push(report) }
     }
-    fn reports(&self) -> &[Report<NamedSpan<'a>>] {
+    pub(crate) fn reports(&self) -> &[Report<NamedSpan<'a>>] {
         unsafe { (*self.reports.get()).as_slice() }
     }
-    fn take_reports(self) -> Vec<Report<NamedSpan<'a>>> {
+    pub(crate) fn take_reports(self) -> Vec<Report<NamedSpan<'a>>> {
         unsafe { self.reports.into_inner() }
     }
-    fn error<F>(&self, offset: usize, f: F)
+    pub(crate) fn error<F>(&self, offset: usize, f: F)
     where
         F: FnOnce(ReportBuilder<NamedSpan<'a>>) -> Report<NamedSpan<'a>>,
     {
@@ -189,7 +189,7 @@ impl<'a> SyntaxContext<'a> {
             offset,
         )))
     }
-    fn warning<F>(&self, offset: usize, f: F)
+    pub(crate) fn warning<F>(&self, offset: usize, f: F)
     where
         F: FnOnce(ReportBuilder<NamedSpan<'a>>) -> Report<NamedSpan<'a>>,
     {
@@ -200,13 +200,13 @@ impl<'a> SyntaxContext<'a> {
         )))
     }
 
-    fn get_variable(&self, name: &str) -> Option<Name> {
+    pub(crate) fn get_variable(&self, name: &str) -> Option<Name> {
         unsafe {
             let map = &*self.variables.get();
             map.get(name).cloned()
         }
     }
-    fn push_variable<'ctx>(&'ctx self, name: &'a str) -> (Name, Guard<'a, 'ctx>) {
+    pub(crate) fn push_variable<'ctx>(&'ctx self, name: &'a str) -> (Name, Guard<'a, 'ctx>) {
         let unique_name = Name::new(name);
         let guard = Guard {
             context: self,
@@ -219,7 +219,7 @@ impl<'a> SyntaxContext<'a> {
         (unique_name, guard)
     }
 
-    fn fresh(&self) -> Name {
+    pub(crate) fn fresh(&self) -> Name {
         let counter = self.fresh_counter.get();
         self.fresh_counter.replace(counter + 1);
         Name::new(format!("fresh_{}", counter))
@@ -236,218 +236,10 @@ impl<'src, 'ctx> Drop for Guard<'src, 'ctx> {
     }
 }
 
-trait BuiltinType {
-    type ElimRules;
-    fn new_from_pattern_rules<'src>(
-        ctx: &SyntaxContext<'src>,
-        rules: &[Ptr<ParseTree<'src>>],
-    ) -> Result<Option<Self::ElimRules>, ()>;
-}
 
-struct BuiltinUnit;
-struct BuiltinPair;
-struct BuiltinBool;
-struct BuiltinBottom;
-
-impl BuiltinType for BuiltinUnit {
-    type ElimRules = RcPtr<Term>;
-
-    fn new_from_pattern_rules<'src>(
-        ctx: &SyntaxContext<'src>,
-        rules: &[Ptr<ParseTree<'src>>],
-    ) -> Result<Option<Self::ElimRules>, ()> {
-        if rules.len() != 1 {
-            return Ok(None);
-        }
-        match rules.first() {
-            Some(Ptr {
-                location,
-                data:
-                    box ParseTree::PatternRule {
-                        constructor,
-                        variables,
-                        body,
-                    },
-            }) => match constructor.get_literal() {
-                "Unit" if variables.is_empty() => match Term::new_from_expr(ctx, body) {
-                    None => Err(()),
-                    Some(tree) => Ok(Some(tree)),
-                },
-                "Unit" => Err(ctx.error(location.start, |builder| {
-                    builder
-                        .with_message("Illegal elimination for Unit type")
-                        .with_label(
-                            Label::new((ctx.source_name, variables[0].location.clone()))
-                                .with_color(Color::Red)
-                                .with_message("unexpected variable(s)"),
-                        )
-                        .finish()
-                })),
-                _ => Ok(None),
-            },
-            _ => assert_unreachable!(),
-        }
-    }
-}
-
-impl BuiltinType for BuiltinPair {
-    type ElimRules = (Option<Name>, Option<Name>, RcPtr<Term>);
-
-    fn new_from_pattern_rules<'src>(
-        ctx: &SyntaxContext<'src>,
-        rules: &[Ptr<ParseTree<'src>>],
-    ) -> Result<Option<Self::ElimRules>, ()> {
-        if rules.len() != 1 {
-            return Ok(None);
-        }
-        match rules.first() {
-            Some(Ptr {
-                location,
-                data:
-                    box ParseTree::PatternRule {
-                        constructor,
-                        variables,
-                        body,
-                    },
-            }) => match constructor.get_literal() {
-                "Pair" if variables.len() == 2 => {
-                    let (left, _left_guard) = Term::new_from_parameter(ctx, &variables[0])
-                        .map(|name| ctx.push_variable(name))
-                        .map(|(x, y)| (Some(x), Some(y)))
-                        .unwrap_or((None, None));
-                    let (right, _right_guard) = Term::new_from_parameter(ctx, &variables[1])
-                        .map(|name| ctx.push_variable(name))
-                        .map(|(x, y)| (Some(x), Some(y)))
-                        .unwrap_or((None, None));
-                    match Term::new_from_expr(ctx, body) {
-                        None => Err(()),
-                        Some(body) => Ok(Some((left, right, body))),
-                    }
-                }
-                "Pair" => Err(ctx.error(location.start, |builder| {
-                    builder
-                        .with_message("Illegal elimination for Sigma type")
-                        .with_label(
-                            Label::new((ctx.source_name, location.clone()))
-                                .with_color(Color::Red)
-                                .with_message(
-                                    "the number parameter is not unmatched for Pair constructor",
-                                ),
-                        )
-                        .finish()
-                })),
-                _ => Ok(None),
-            },
-            _ => assert_unreachable!(),
-        }
-    }
-}
-
-impl BuiltinType for BuiltinBottom {
-    type ElimRules = ();
-
-    fn new_from_pattern_rules<'src>(
-        _: &SyntaxContext<'src>,
-        rules: &[Ptr<ParseTree<'src>>],
-    ) -> Result<Option<Self::ElimRules>, ()> {
-        if rules.is_empty() {
-            Ok(Some(()))
-        } else {
-            Ok(None)
-        }
-    }
-}
-
-impl BuiltinType for BuiltinBool {
-    type ElimRules = (RcPtr<Term>, RcPtr<Term>);
-
-    fn new_from_pattern_rules<'src>(
-        ctx: &SyntaxContext<'src>,
-        rules: &[Ptr<ParseTree<'src>>],
-    ) -> Result<Option<Self::ElimRules>, ()> {
-        if rules.len() != 2 {
-            return Ok(None);
-        }
-        fn basic_info<'a, 'src: 'a>(
-            tree: &'a ParseTree<'src>,
-        ) -> (&'src str, usize, &'a Ptr<ParseTree<'src>>) {
-            match tree {
-                ParseTree::PatternRule {
-                    constructor,
-                    variables,
-                    body,
-                } => (constructor.get_literal(), variables.len(), body),
-                _ => assert_unreachable!(),
-            }
-        }
-        let info = [
-            basic_info(rules[0].data.as_ref()),
-            basic_info(rules[1].data.as_ref()),
-        ];
-        match (info[0], info[1]) {
-            (("True", 0, true_body), ("False", 0, false_body))
-            | (("False", 0, false_body), ("True", 0, true_body)) => {
-                let r#true = Term::new_from_expr(ctx, true_body);
-                let r#false = Term::new_from_expr(ctx, false_body);
-                let branches =
-                    r#true.and_then(move |r#true| r#false.map(move |r#false| (r#true, r#false)));
-                match branches {
-                    None => Err(()),
-                    Some(branches) => Ok(Some(branches)),
-                }
-            }
-            (("True", i, _), ("False", j, _)) | (("False", i, _), ("True", j, _)) => {
-                let report_error = |idx: usize| {
-                    ctx.error(rules[idx].location.start, |builder| {
-                        builder
-                            .with_message("Illegal elimination for Bool type")
-                            .with_label(
-                                Label::new((ctx.source_name, rules[idx].location.clone()))
-                                    .with_color(Color::Red)
-                                    .with_message(format!(
-                                        "unexpected parameter(s) for {} constructor",
-                                        info[idx].0
-                                    )),
-                            )
-                            .finish()
-                    })
-                };
-                if i > 0 {
-                    report_error(0);
-                }
-                if j > 0 {
-                    report_error(1);
-                }
-                Err(())
-            }
-            (("True", _, _), ("True", _, _)) | (("False", _, _), ("False", _, _)) => {
-                ctx.error(rules[0].location.start, |builder| {
-                    builder
-                        .with_message("Overlapped patterns")
-                        .with_label(
-                            Label::new((ctx.source_name, rules[0].location.clone()))
-                                .with_color(Color::Red)
-                                .with_message(format!(
-                                    "the pattern {} is already covered here",
-                                    info[0].0
-                                )),
-                        )
-                        .with_label(
-                            Label::new((ctx.source_name, rules[1].location.clone()))
-                                .with_color(Color::Red)
-                                .with_message("...however, it appears again later"),
-                        )
-                        .finish()
-                });
-                Err(())
-            }
-            _ => Ok(None),
-        }
-    }
-}
 
 impl Term {
-    fn new_from_parameter<'a>(
+    pub(crate) fn new_from_parameter<'a>(
         ctx: &SyntaxContext<'a>,
         tree: &Ptr<ParseTree<'a>>,
     ) -> Option<&'a str> {
@@ -469,7 +261,7 @@ impl Term {
         }
     }
 
-    fn new_from_expr<'a>(
+    pub(crate) fn new_from_expr<'a>(
         ctx: &SyntaxContext<'a>,
         tree: &Ptr<ParseTree<'a>>,
     ) -> Option<RcPtr<Self>> {
@@ -727,7 +519,7 @@ impl Term {
         }
     }
 
-    fn new_from_params_and_body<'a>(
+    pub(crate) fn new_from_params_and_body<'a>(
         ctx: &SyntaxContext<'a>,
         params: &Vec<Ptr<ParseTree<'a>>>,
         body: &Ptr<ParseTree<'a>>,
@@ -750,7 +542,7 @@ impl Term {
         })
     }
 
-    fn new_from_function_definition<'a>(
+    pub(crate) fn new_from_function_definition<'a>(
         ctx: &SyntaxContext<'a>,
         tree: &Ptr<ParseTree<'a>>,
     ) -> Option<RcPtr<Self>> {
@@ -762,7 +554,7 @@ impl Term {
         }
     }
 
-    fn new_from_variable<'a>(
+    pub(crate) fn new_from_variable<'a>(
         ctx: &SyntaxContext<'a>,
         tree: &Ptr<ParseTree<'a>>,
     ) -> Option<RcPtr<Self>> {

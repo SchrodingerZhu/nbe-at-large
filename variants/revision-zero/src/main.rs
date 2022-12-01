@@ -1,6 +1,7 @@
 #![feature(adt_const_params)]
 #![feature(box_patterns)]
 mod term;
+mod builtin;
 
 #[macro_export]
 macro_rules! assert_unreachable {
