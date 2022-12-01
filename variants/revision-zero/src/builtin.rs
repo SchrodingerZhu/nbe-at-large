@@ -1,7 +1,7 @@
-use grammar::syntactic::{ParseTree, Ptr};
-use ariadne::{Label, Color};
-use crate::term::{Term, RcPtr, Name, SyntaxContext};
 use crate::assert_unreachable;
+use crate::term::{Name, RcPtr, SyntaxContext, Term};
+use ariadne::{Color, Label};
+use grammar::syntactic::{ParseTree, Ptr};
 
 pub(crate) trait BuiltinType {
     type ElimRules;
@@ -28,14 +28,14 @@ impl BuiltinType for BuiltinUnit {
         }
         match rules.first() {
             Some(Ptr {
-                     location,
-                     data:
-                     box ParseTree::PatternRule {
-                         constructor,
-                         variables,
-                         body,
-                     },
-                 }) => match constructor.get_literal() {
+                location,
+                data:
+                    box ParseTree::PatternRule {
+                        constructor,
+                        variables,
+                        body,
+                    },
+            }) => match constructor.get_literal() {
                 "Unit" if variables.is_empty() => match Term::new_from_expr(ctx, body) {
                     None => Err(()),
                     Some(tree) => Ok(Some(tree)),
@@ -69,14 +69,14 @@ impl BuiltinType for BuiltinPair {
         }
         match rules.first() {
             Some(Ptr {
-                     location,
-                     data:
-                     box ParseTree::PatternRule {
-                         constructor,
-                         variables,
-                         body,
-                     },
-                 }) => match constructor.get_literal() {
+                location,
+                data:
+                    box ParseTree::PatternRule {
+                        constructor,
+                        variables,
+                        body,
+                    },
+            }) => match constructor.get_literal() {
                 "Pair" if variables.len() == 2 => {
                     let (left, _left_guard) = Term::new_from_parameter(ctx, &variables[0])
                         .map(|name| ctx.push_variable(name))

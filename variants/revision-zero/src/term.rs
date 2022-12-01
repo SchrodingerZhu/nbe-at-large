@@ -1,11 +1,12 @@
-use ariadne::{Color, Label, Report, ReportBuilder};
+use crate::assert_unreachable;
+use crate::builtin::{BuiltinBool, BuiltinBottom, BuiltinPair, BuiltinType, BuiltinUnit};
+use ariadne::{Color, Label, Report, ReportBuilder, Span};
+use grammar::syntactic::{ParseTree, Ptr};
 use std::cell::{Cell, UnsafeCell};
+use std::collections::hash_map::Entry;
 use std::hash::{Hash, Hasher};
 use std::ops::Range;
 use std::{collections::HashMap, rc::Rc};
-use crate::builtin::{BuiltinBool, BuiltinBottom, BuiltinPair, BuiltinUnit, BuiltinType};
-use crate::assert_unreachable;
-use grammar::syntactic::{ParseTree, Ptr};
 #[derive(Clone, Debug)]
 #[repr(transparent)]
 pub struct Name(Rc<String>);
@@ -77,70 +78,45 @@ pub enum Term {
     SigmaElim(RcPtr<Self>, Option<Name>, Option<Name>, RcPtr<Self>),
 }
 
-pub enum Definition {
-    FuncDecl(Name, Term),
-    FuncDefine(Name, Term),
+#[derive(Debug)]
+pub struct Definition {
+    name: Name,
+    term: RcPtr<Term>,
 }
 
 impl Definition {
-    pub(crate) fn new_from_definition<'a>(
-        ctx: &SyntaxContext<'a>,
-        tree: &Ptr<ParseTree<'_>>,
-    ) -> Option<RcPtr<Self>> {
-        match tree.data.as_ref() {
-            ParseTree::Import(_) => {
-                ctx.warning(tree.location.start, |builer| {
-                    builer
-                        .with_message("unsupported feature")
-                        .with_label(
-                            Label::new((ctx.source_name, tree.location.clone()))
-                                .with_color(Color::Yellow)
-                                .with_message("import is not supported and will be ignored"),
-                        )
-                        .finish()
-                });
-                None
-            }
-            ParseTree::TypeDecl { .. } => {
-                ctx.warning(tree.location.start, |builder| {
-                    builder
-                        .with_message("unsupported feature")
-                        .with_label(
-                            Label::new((ctx.source_name, tree.location.clone()))
-                                .with_color(Color::Yellow)
-                                .with_message(
-                                    "custom data type is not supported and will be ignored",
-                                ),
-                        )
-                        .finish()
-                });
-                None
-            }
-            ParseTree::FuncDecl { .. } => {
-                todo!()
-            }
-            ParseTree::FuncDefine { .. } => {
-                todo!()
-            }
-            _ => assert_unreachable!(),
-        }
-    }
-
     pub(crate) fn new_from_module<'a>(
         source_name: &'a str,
         source: &'a str,
-        tree: &Ptr<ParseTree<'_>>,
-    ) -> (Vec<RcPtr<Self>>, Vec<Report<NamedSpan<'a>>>) {
+        tree: &Ptr<ParseTree<'a>>,
+    ) -> (Vec<Definition>, Vec<Report<NamedSpan<'a>>>) {
         match tree.data.as_ref() {
             ParseTree::Module { definitions, .. } => {
-                let mut translated = Vec::new();
-                let mut ctx = SyntaxContext::new(source_name, source);
-                for i in definitions {
-                    if let Some(x) = Self::new_from_definition(&mut ctx, i) {
-                        translated.push(x);
+                let context = SyntaxContext::new(source_name, source);
+                let records = scan_module_definitions(&context, definitions.as_slice());
+                let mut global_guards = Vec::new();
+                let mut definitions = Vec::new();
+                if let Some(map) = records.as_ref() {
+                    for i in map {
+                        global_guards.push(context.push_variable(i.0));
+                    }
+                    for i in global_guards.iter() {
+                        let name = i.0.clone();
+                        let i = unsafe { map.get(name.0.as_str()).unwrap_unchecked() };
+                        let type_tree = unsafe { i.0.as_ref().unwrap_unchecked() };
+                        let def_tree = unsafe { i.1.as_ref().unwrap_unchecked() };
+                        let term = Term::new_from_expr(&context, type_tree).and_then(|decl| {
+                            Term::new_from_function_definition(&context, def_tree).map(move |def| {
+                                RcPtr::new(def_tree.location.clone(), Term::Ann(def, decl))
+                            })
+                        });
+                        if let Some(term) = term {
+                            definitions.push(Definition { name, term });
+                        }
                     }
                 }
-                (translated, ctx.take_reports())
+                drop(global_guards);
+                (definitions, context.take_reports())
             }
             _ => assert_unreachable!(),
         }
@@ -235,8 +211,6 @@ impl<'src, 'ctx> Drop for Guard<'src, 'ctx> {
         }
     }
 }
-
-
 
 impl Term {
     pub(crate) fn new_from_parameter<'a>(
@@ -617,23 +591,181 @@ fn test() {
     }
 }
 
+struct Record<'src, 'tree>(
+    Option<&'tree Ptr<ParseTree<'src>>>,
+    Option<&'tree Ptr<ParseTree<'src>>>,
+);
+
+fn scan_module_definitions<'tree, 'src: 'tree>(
+    ctx: &SyntaxContext<'src>,
+    defs: &'tree [Ptr<ParseTree<'src>>],
+) -> Option<HashMap<&'src str, Record<'src, 'tree>>> {
+    let mut map = Some(HashMap::new());
+    for i in defs {
+        match i.data.as_ref() {
+            ParseTree::Import(_) => {
+                ctx.warning(i.location.start, |builer| {
+                    builer
+                        .with_message("unsupported feature")
+                        .with_label(
+                            Label::new((ctx.source_name, i.location.clone()))
+                                .with_color(Color::Yellow)
+                                .with_message("import is not supported and will be ignored"),
+                        )
+                        .finish()
+                });
+            }
+            ParseTree::TypeDecl { .. } => {
+                ctx.warning(i.location.start, |builder| {
+                    builder
+                        .with_message("unsupported feature")
+                        .with_label(
+                            Label::new((ctx.source_name, i.location.clone()))
+                                .with_color(Color::Yellow)
+                                .with_message(
+                                    "custom data type is not supported and will be ignored",
+                                ),
+                        )
+                        .finish()
+                });
+            }
+            ParseTree::FuncDecl { name, r#type } => {
+                let name = name.get_literal();
+                map = map.and_then(|mut map| {
+                    let mut success = true;
+                    match map.entry(name) {
+                        Entry::Occupied(record) => {
+                            let record: &mut Record = record.into_mut();
+                            if record.0.is_some() {
+                                ctx.error(i.location.start, |builder| {
+                                    builder
+                                        .with_message("Multiple declarations")
+                                        .with_label(
+                                            Label::new((ctx.source_name, i.location.clone()))
+                                                .with_color(Color::Red)
+                                                .with_message(format!(
+                                                    "declaration of symbol {} is already provided",
+                                                    name
+                                                )),
+                                        )
+                                        .finish()
+                                });
+                            } else {
+                                record.0 = Some(r#type);
+                            }
+                        }
+                        Entry::Vacant(position) => {
+                            position.insert(Record(Some(r#type), None));
+                        }
+                    }
+                    if success {
+                        Some(map)
+                    } else {
+                        None
+                    }
+                })
+            }
+            ParseTree::FuncDefine { name, .. } => {
+                let name = name.get_literal();
+                map = map.and_then(|mut map| {
+                    let mut success = true;
+                    match map.entry(name) {
+                        Entry::Occupied(record) => {
+                            let record: &mut Record = record.into_mut();
+                            if record.1.is_some() {
+                                ctx.error(i.location.start, |builder| {
+                                    builder
+                                        .with_message("Multiple definitions")
+                                        .with_label(
+                                            Label::new((ctx.source_name, i.location.clone()))
+                                                .with_color(Color::Red)
+                                                .with_message(format!(
+                                                    "Definition of symbol {} is already provided",
+                                                    name
+                                                )),
+                                        )
+                                        .finish()
+                                });
+                                success = false;
+                            } else {
+                                record.1 = Some(i);
+                            }
+                        }
+                        Entry::Vacant(position) => {
+                            position.insert(Record(None, Some(i)));
+                        }
+                    }
+                    if success {
+                        Some(map)
+                    } else {
+                        None
+                    }
+                })
+            }
+            _ => assert_unreachable!(),
+        }
+    }
+    map.and_then(|map| {
+        let mut success = true;
+        for (name, record) in map.iter() {
+            if record.0.is_none() {
+                let provided = unsafe { record.1.as_ref().unwrap_unchecked() };
+                ctx.error(provided.location.start, |builder| {
+                    builder
+                        .with_message("Incomplete term")
+                        .with_label(
+                            Label::new((ctx.source_name, provided.location.clone()))
+                                .with_color(Color::Red)
+                                .with_message(format!("Symbol {} does not have declaration", name)),
+                        )
+                        .finish()
+                });
+                success = false;
+            }
+            if record.1.is_none() {
+                let provided = unsafe { record.0.as_ref().unwrap_unchecked() };
+                ctx.error(provided.location.start, |builder| {
+                    builder
+                        .with_message("Incomplete term")
+                        .with_label(
+                            Label::new((ctx.source_name, provided.location.clone()))
+                                .with_color(Color::Red)
+                                .with_message(format!("Symbol {} does not have definition", name)),
+                        )
+                        .finish()
+                });
+                success = false
+            }
+        }
+        if success {
+            Some(map)
+        } else {
+            None
+        }
+    })
+}
+
 #[test]
 fn test_func_def() {
     let source = r#"
     module Test
+
+    myType : Type
+    myType = Bool
+
+    test : myType -> myType -> `Sigma myType, myType
     test x = let u = lambda y . (@Pair x y) in u 
 "#;
     let parse_tree = grammar::syntactic::parse(source).1;
     eprintln!("{:#?}", parse_tree);
     let parse_tree = grammar::syntactic::parse(source).0.unwrap();
-    let ctx = SyntaxContext::new("source.txt", source);
-    if let ParseTree::Module { definitions, .. } = parse_tree.data.as_ref() {
-        let func_def = Term::new_from_function_definition(&ctx, &definitions[0]);
-        for i in ctx.reports().iter() {
-            i.eprint(("source.txt", ariadne::Source::from(source)))
-                .unwrap();
-        }
-        println!("{:?}", func_def.unwrap())
+    let definitions = Definition::new_from_module("source.txt", source, &parse_tree);
+    for i in definitions.1.iter() {
+        i.eprint(("source.txt", ariadne::Source::from(source)))
+            .unwrap();
+    }
+    {
+        println!("{:#?}", definitions.0)
     }
 }
 
