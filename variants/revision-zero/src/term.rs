@@ -60,7 +60,7 @@ pub enum Term {
     Variable(Name),
     Lam(Option<Name>, RcPtr<Self>),
     App(RcPtr<Self>, RcPtr<Self>),
-    Pi(RcPtr<Self>, Option<Name>, RcPtr<Self>),
+    Pi(RcPtr<Self>, RcPtr<Self>),
     Ann(RcPtr<Self>, RcPtr<Self>),
     Let(Option<Name>, RcPtr<Self>, RcPtr<Self>),
     TrustMe,
@@ -72,7 +72,7 @@ pub enum Term {
     BoolType,
     BoolIntro(bool),
     BoolElim(RcPtr<Self>, RcPtr<Self>, RcPtr<Self>),
-    SigmaType(RcPtr<Self>, Option<Name>, RcPtr<Self>),
+    SigmaType(RcPtr<Self>, RcPtr<Self>),
     SigmaIntro(RcPtr<Self>, RcPtr<Self>),
     SigmaElim(RcPtr<Self>, Option<Name>, Option<Name>, RcPtr<Self>),
 }
@@ -610,7 +610,108 @@ impl Term {
             }
             ParseTree::TrustMe => Some(RcPtr::new(location, Term::TrustMe)),
             ParseTree::Type => Some(RcPtr::new(location, Term::Type)),
-            _ => assert_unreachable!(),
+            ParseTree::Sigma { left, right } => match left.data.as_ref() {
+                ParseTree::Telescope {
+                    name, annotation, ..
+                } => {
+                    let (name, _guard) = ctx.push_variable(name.get_literal());
+                    let left = Term::new_from_expr(ctx, annotation);
+                    let right = Term::new_from_expr(ctx, right);
+                    left.and_then(move |left| {
+                        right.map(move |right| {
+                            RcPtr::new(
+                                location.clone(),
+                                Term::SigmaType(
+                                    left,
+                                    RcPtr::new(location.clone(), Term::Lam(Some(name), right)),
+                                ),
+                            )
+                        })
+                    })
+                }
+                _ => {
+                    let left = Term::new_from_expr(ctx, left);
+                    let right = Term::new_from_expr(ctx, right);
+                    left.and_then(move |left| {
+                        right.map(move |right| {
+                            RcPtr::new(
+                                location.clone(),
+                                Term::SigmaType(
+                                    left,
+                                    RcPtr::new(location.clone(), Term::Lam(None, right)),
+                                ),
+                            )
+                        })
+                    })
+                }
+            },
+            ParseTree::Arrow { left, right } => match left.data.as_ref() {
+                ParseTree::Telescope {
+                    name, annotation, ..
+                } => {
+                    let (name, _guard) = ctx.push_variable(name.get_literal());
+                    let left = Term::new_from_expr(ctx, annotation);
+                    let right = Term::new_from_expr(ctx, right);
+                    left.and_then(move |left| {
+                        right.map(move |right| {
+                            RcPtr::new(
+                                location.clone(),
+                                Term::Pi(
+                                    left,
+                                    RcPtr::new(location.clone(), Term::Lam(Some(name), right)),
+                                ),
+                            )
+                        })
+                    })
+                }
+                _ => {
+                    let left = Term::new_from_expr(ctx, left);
+                    let right = Term::new_from_expr(ctx, right);
+                    left.and_then(move |left| {
+                        right.map(move |right| {
+                            RcPtr::new(
+                                location.clone(),
+                                Term::Pi(
+                                    left,
+                                    RcPtr::new(location.clone(), Term::Lam(None, right)),
+                                ),
+                            )
+                        })
+                    })
+                }
+            },
+            ParseTree::TypeRef(name) => match name.get_literal() {
+                "Unit" => Some(RcPtr::new(location, Term::UnitType)),
+                "Bottom" => Some(RcPtr::new(location, Term::BottomType)),
+                "Bool" => Some(RcPtr::new(location, Term::BoolType)),
+                "Sigma" => {
+                    let a = ctx.fresh();
+                    let b = ctx.fresh();
+                    let var_a = RcPtr::new(location.clone(), Term::Variable(a.clone()));
+                    let var_b = RcPtr::new(location.clone(), Term::Variable(b.clone()));
+                    let sigma = RcPtr::new(location.clone(), Term::SigmaType(var_a, var_b));
+                    let lambda = RcPtr::new(location.clone(), Term::Lam(Some(b), sigma));
+                    let lambda = RcPtr::new(location, Term::Lam(Some(a), lambda));
+                    Some(lambda)
+                }
+                _ => {
+                    ctx.error(location.start, |builder| {
+                        builder
+                            .with_message("unsupported feature")
+                            .with_label(
+                                Label::new((ctx.source_name, location))
+                                    .with_color(Color::Red)
+                                    .with_message(format!(
+                                        "custom type {} is not supported",
+                                        name.get_literal()
+                                    )),
+                            )
+                            .finish()
+                    });
+                    None
+                }
+            },
+            _ => assert_unreachable!("{:#?}", tree),
         }
     }
 
@@ -700,8 +801,8 @@ fn test() {
     import A
     import B
     data List (a : Type) = {
-        Nil : List<a>;
-        Cons : a -> List<a> -> List<a>;
+        Nil : (List a);
+        Cons : a -> (List a) -> (List a);
     }
 "#;
     let parse_tree = grammar::syntactic::parse(source).0.unwrap();
@@ -803,6 +904,29 @@ fn test_match_bool() {
     test x = case x of {
         True -> !!;
         False -> !!;
+    } 
+"#;
+    let parse_tree = grammar::syntactic::parse(source).1;
+    eprintln!("{:#?}", parse_tree);
+    let parse_tree = grammar::syntactic::parse(source).0.unwrap();
+    let ctx = SyntaxContext::new("source.txt", source);
+    if let ParseTree::Module { definitions, .. } = parse_tree.data.as_ref() {
+        let func_def = Term::new_from_function_definition(&ctx, &definitions[0]);
+        for i in ctx.reports().iter() {
+            i.eprint(("source.txt", ariadne::Source::from(source)))
+                .unwrap();
+        }
+        println!("{:?}", func_def.unwrap())
+    }
+}
+
+#[test]
+fn test_type_level() {
+    let source = r#"
+    module Test
+    test check x = case x of {
+        True -> `Pi (i : Bool), (check i);
+        False -> `Sigma (i : Bool), (check i);
     } 
 "#;
     let parse_tree = grammar::syntactic::parse(source).1;

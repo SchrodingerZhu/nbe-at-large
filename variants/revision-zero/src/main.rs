@@ -7,9 +7,9 @@ macro_rules! assert_unreachable {
     () => {
         assert_unreachable!("entered unreachable code")
     };
-    ($e:expr) => {
+    ($($e:expr),*) => {
         if cfg!(debug_assertions) {
-            panic!($e)
+            panic!($($e),*)
         } else {
             unsafe { core::hint::unreachable_unchecked() }
         }

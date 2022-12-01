@@ -38,17 +38,22 @@ pub enum Token {
     #[token("]")]
     RSquare,
 
-    #[token("<")]
-    LAngle,
-
-    #[token(">")]
-    RAngle,
-
     #[token("(")]
     LParen,
 
     #[token(")")]
     RParen,
+
+    #[token("`Pi")]
+    #[token("∏")]
+    Pi,
+
+    #[token("`Sigma")]
+    #[token("∑")]
+    Sigma,
+
+    #[token(",")]
+    Comma,
 
     #[token(".")]
     Dot,

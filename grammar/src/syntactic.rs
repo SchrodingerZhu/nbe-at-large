@@ -52,18 +52,15 @@ pub enum ParseTree<'a> {
     },
 
     Type,
-    TypeExpr {
-        name: Ptr<Self>,
-        params: Vec<Ptr<Self>>,
-    },
+    TypeRef(Ptr<Self>),
     Telescope {
         name: Ptr<Self>,
         annotation: Ptr<Self>,
         implicit: bool,
     },
     Arrow {
-        lhs: Ptr<Self>,
-        rhs: Ptr<Self>,
+        left: Ptr<Self>,
+        right: Ptr<Self>,
     },
     TypeDecl {
         former: Ptr<Self>,
@@ -90,6 +87,12 @@ pub enum ParseTree<'a> {
     FuncApply {
         func: Ptr<Self>,
         args: Vec<Ptr<Self>>,
+    },
+
+    // syntax suger for sigma type
+    Sigma {
+        left: Ptr<Self>,
+        right: Ptr<Self>,
     },
 
     // no nested destructure for now
@@ -151,6 +154,26 @@ mod implementation {
             .then_ignore(end())
             .map_with_span(|(name, definitions), span| {
                 Ptr::new(span.span, Module { name, definitions })
+            })
+    }
+
+    fn parse_dependent_syntax_super<'a>(token: Token, expr: impl Parse<'a>) -> impl Parse<'a> {
+        let consume_symbol = just(token);
+        let left = parse_telescope(false, expr.clone()).or(expr.clone());
+        let consume_comma = just(Token::Comma);
+        consume_symbol
+            .ignore_then(left)
+            .then_ignore(consume_comma)
+            .then(expr)
+            .map_with_span(move |(left, right), span| {
+                Ptr::new(
+                    span.span,
+                    match token {
+                        Token::Sigma => Sigma { left, right },
+                        Token::Pi => Arrow { left, right },
+                        _ => assert_unreachable!(),
+                    },
+                )
             })
     }
 
@@ -256,6 +279,11 @@ mod implementation {
             .ignore_then(name.map_with_span(|name, span| Ptr::new(span.span, ConstructorRef(name))))
     }
 
+    fn parse_type_ref<'a>() -> impl Parse<'a> {
+        let name = parse_literal(Token::BigCase);
+        name.map_with_span(|name, span| Ptr::new(span.span, TypeRef(name)))
+    }
+
     fn parse_simple_type_expr<'a>(expr: impl Parse<'a>) -> impl Parse<'a> {
         parse_arrow_expr_primitives(expr.clone())
             .or(parse_telescope(true, expr.clone()))
@@ -276,29 +304,12 @@ mod implementation {
                         Ptr::new(
                             current.location.start()..prev.location.end(),
                             Arrow {
-                                lhs: current,
-                                rhs: prev,
+                                left: current,
+                                right: prev,
                             },
                         )
                     })
                 })
-        })
-    }
-
-    fn parse_type_expr<'a>(expr: impl Parse<'a>) -> impl Parse<'a> {
-        let name = parse_literal(Token::BigCase);
-        let params = expr
-            .repeated()
-            .delimited_by(just(Token::LAngle), just(Token::RAngle))
-            .or_not();
-        name.then(params).map_with_span(|(name, params), span| {
-            Ptr::new(
-                span.span,
-                TypeExpr {
-                    name,
-                    params: params.unwrap_or_else(Vec::new),
-                },
-            )
         })
     }
 
@@ -350,13 +361,15 @@ mod implementation {
 
         parse_variable()
             .or(parse_constructor_ref())
+            .or(parse_type_ref())
             .or(trustme)
             .or(parse_function_apply(expr.clone()))
             .or(parse_lambda(expr.clone()))
             .or(parse_pattern_match(expr.clone()))
             .or(parse_let_in_expr(expr.clone()))
+            .or(parse_dependent_syntax_super(Token::Pi, expr.clone()))
+            .or(parse_dependent_syntax_super(Token::Sigma, expr))
             .or(r#type)
-            .or(parse_type_expr(expr.clone()))
     }
 
     fn parse_expr<'a>() -> impl Parse<'a> {
@@ -377,14 +390,16 @@ mod implementation {
                 just(Token::Type).map_with_span(|_, span: SrcSpan<'a>| Ptr::new(span.span, Type));
             parse_arrow_expr(expr.clone())
                 .or(parse_constructor_ref())
+                .or(parse_type_ref())
                 .or(trustme)
                 .or(parse_function_apply(expr.clone()))
                 .or(parse_lambda(expr.clone()))
                 .or(parse_pattern_match(expr.clone()))
                 .or(parse_let_in_expr(expr.clone()))
                 .or(parse_variable())
+                .or(parse_dependent_syntax_super(Token::Pi, expr.clone()))
+                .or(parse_dependent_syntax_super(Token::Sigma, expr))
                 .or(r#type)
-                .or(parse_type_expr(expr))
         })
     }
 
@@ -529,8 +544,8 @@ mod implementation {
             module Test
             import Primitive
             data List (a : Type) = {
-                Nil : List<a>;
-                Cons : a -> List<a> -> List<a>;
+                Nil : (List a);
+                Cons : a -> (List a) -> (List a);
             }
         ";
         let steam = crate::lexical::LexerStream::chumsky_stream(src);
@@ -543,7 +558,19 @@ mod implementation {
         let src = "
             module Test
             import Primitive
-            map : [a : Type] -> [b : Type] -> (a -> b) -> List<a> -> List<b> -> (let b = b in A<b>)
+            map : [a : Type] -> [b : Type] -> (a -> b) -> (List a) -> (List b) -> (let b = b in (A b))
+        ";
+        let steam = crate::lexical::LexerStream::chumsky_stream(src);
+        let parsed = parse_module().parse(steam);
+        println!("{:?}", parsed.unwrap());
+    }
+
+    #[test]
+    fn test_suger() {
+        let src = "
+            module Test
+            import Primitive
+            map : `Pi (x : Nat) , `Sigma (y : Nat) , (Gt x y)
         ";
         let steam = crate::lexical::LexerStream::chumsky_stream(src);
         let parsed = parse_module().parse(steam);
@@ -569,7 +596,7 @@ mod implementation {
     fn test_simple() {
         let src = "
             module Test
-            list = List<Nat>
+            list = (List Nat)
             test = lambda a b . (@Cons a b)
         ";
         let stream = crate::lexical::LexerStream::chumsky_stream(src);
