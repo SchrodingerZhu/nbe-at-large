@@ -7,6 +7,8 @@ use std::collections::hash_map::Entry;
 use std::hash::{Hash, Hasher};
 use std::ops::Range;
 use std::{collections::HashMap, rc::Rc};
+use std::fmt::Debug;
+
 #[derive(Clone, Debug)]
 #[repr(transparent)]
 pub struct Name(Rc<String>);
@@ -53,6 +55,87 @@ impl<T> std::ops::Deref for RcPtr<T> {
 }
 
 type NamedSpan<'a> = (&'a str, Range<usize>);
+
+impl<T : std::fmt::Display> std::fmt::Display for RcPtr<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.data.fmt(f)
+    }
+}
+
+impl std::fmt::Display for Term {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Term::Type => {
+                write!(f, "Type")
+            }
+            Term::Variable(name) => {
+                std::fmt::Display::fmt(name.0.as_str(), f)
+            }
+            Term::Lam(x, y) => {
+                match x {
+                    Some(n) => write!(f, "(λ {} . {})", n.0, y),
+                    None => write!(f, "(λ _ . {})", y)
+                }
+            }
+            Term::App(x, y) => {
+                write!(f, "({} {})", x, y)
+            }
+            Term::Pi(x, y) => {
+                write!(f, "(∏ {} {})", x, y)
+            }
+            Term::Ann(x, y) => {
+                write!(f, "({} : {})", x, y)
+            }
+            Term::Let(x, y, z) => {
+                match x {
+                    Some(n) => write!(f, "(let {} = {} in {})", n.0, y, z),
+                    None => write!(f, "(let _ = {} in {})", y, z)
+                }
+            }
+            Term::TrustMe => {
+                write!(f, "!!")
+            }
+            Term::BottomType => {
+                write!(f, "𝟘")
+            }
+            Term::BottomElim(e) => {
+                write!(f, "(𝟘-elim {})", e)
+            }
+            Term::UnitType => {
+                write!(f, "𝟙")
+            }
+            Term::UnitIntro => {
+                write!(f, "🟉")
+            }
+            Term::UnitElim(x, y) => {
+                write!(f, "(𝟙-elim {} {})", x, y)
+            }
+            Term::BoolType => {
+                write!(f, "𝟚")
+            }
+            Term::BoolIntro(x) => {
+                match x {
+                    true => write!(f, "True"),
+                    false => write!(f, "False")
+                }
+            }
+            Term::BoolElim(x, y, z) => {
+                write!(f, "(𝟚-elim {} {} {})", x, y, z)
+            }
+            Term::SigmaType(x, y) => {
+                write!(f, "(∑ {} {})", x, y)
+            }
+            Term::SigmaIntro(x, y) => {
+                write!(f, "({} , {})", x, y)
+            }
+            Term::SigmaElim(a, b, c, d) => {
+                let b = b.as_ref().map(|x|x.0.as_str()).unwrap_or("_");
+                let c = c.as_ref().map(|x|x.0.as_str()).unwrap_or("_");
+                write!(f, "(let ({}, {}) = {} in {})", b, c, a, d)
+            }
+        }
+    }
+}
 
 #[derive(Debug)]
 // RcPtr because we may want to substitute
@@ -755,7 +838,9 @@ mod test {
                 .unwrap();
         }
         {
-            println!("{:#?}", definitions.0)
+            for i in definitions.0 {
+                println!("{} = {}", i.name.0, i.term)
+            }
         }
     }
 
@@ -799,7 +884,7 @@ mod test {
     fn test_match_pair() {
         let source = r#"
     module Test
-    test : `Sigma Bool, Bool -> Bool
+    test : (`Sigma Bool, Bool) -> Bool
     test x = case x of {
         Pair l _ -> l;
     } 
@@ -813,8 +898,8 @@ mod test {
     module Test
     test : Bool -> Type
     test x = case x of {
-        True -> Bool;
-        False -> Unit;
+        True -> Unit;
+        False -> Bottom;
     } 
 "#;
         parse_from_source(source);
@@ -827,7 +912,7 @@ mod test {
     test : (Type -> Bool -> Type) -> Bool -> Type
     test check x = case x of {
         True -> `Pi (i : Bool), let u : Type ~= (check u i) in u;
-        False -> `Sigma (i : Bool), (check !! i);
+        False -> `Sigma (i : Bool), (check Bool i);
     } 
 "#;
         parse_from_source(source);
