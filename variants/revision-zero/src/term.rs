@@ -4,10 +4,10 @@ use ariadne::{Color, Label, Report, ReportBuilder};
 use grammar::syntactic::{ParseTree, Ptr};
 use std::cell::{Cell, UnsafeCell};
 use std::collections::hash_map::Entry;
+use std::fmt::Debug;
 use std::hash::{Hash, Hasher};
 use std::ops::Range;
 use std::{collections::HashMap, rc::Rc};
-use std::fmt::Debug;
 
 #[derive(Clone, Debug)]
 #[repr(transparent)]
@@ -56,7 +56,7 @@ impl<T> std::ops::Deref for RcPtr<T> {
 
 type NamedSpan<'a> = (&'a str, Range<usize>);
 
-impl<T : std::fmt::Display> std::fmt::Display for RcPtr<T> {
+impl<T: std::fmt::Display> std::fmt::Display for RcPtr<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.data.fmt(f)
     }
@@ -68,15 +68,11 @@ impl std::fmt::Display for Term {
             Term::Type => {
                 write!(f, "Type")
             }
-            Term::Variable(name) => {
-                std::fmt::Display::fmt(name.0.as_str(), f)
-            }
-            Term::Lam(x, y) => {
-                match x {
-                    Some(n) => write!(f, "(λ {} . {})", n.0, y),
-                    None => write!(f, "(λ _ . {})", y)
-                }
-            }
+            Term::Variable(name) => std::fmt::Display::fmt(name.0.as_str(), f),
+            Term::Lam(x, y) => match x {
+                Some(n) => write!(f, "(λ {} . {})", n.0, y),
+                None => write!(f, "(λ _ . {})", y),
+            },
             Term::App(x, y) => {
                 write!(f, "({} {})", x, y)
             }
@@ -86,12 +82,10 @@ impl std::fmt::Display for Term {
             Term::Ann(x, y) => {
                 write!(f, "({} : {})", x, y)
             }
-            Term::Let(x, y, z) => {
-                match x {
-                    Some(n) => write!(f, "(let {} = {} in {})", n.0, y, z),
-                    None => write!(f, "(let _ = {} in {})", y, z)
-                }
-            }
+            Term::Let(x, y, z) => match x {
+                Some(n) => write!(f, "(let {} = {} in {})", n.0, y, z),
+                None => write!(f, "(let _ = {} in {})", y, z),
+            },
             Term::TrustMe => {
                 write!(f, "!!")
             }
@@ -113,12 +107,10 @@ impl std::fmt::Display for Term {
             Term::BoolType => {
                 write!(f, "𝟚")
             }
-            Term::BoolIntro(x) => {
-                match x {
-                    true => write!(f, "True"),
-                    false => write!(f, "False")
-                }
-            }
+            Term::BoolIntro(x) => match x {
+                true => write!(f, "True"),
+                false => write!(f, "False"),
+            },
             Term::BoolElim(x, y, z) => {
                 write!(f, "(𝟚-elim {} {} {})", x, y, z)
             }
@@ -129,8 +121,8 @@ impl std::fmt::Display for Term {
                 write!(f, "({} , {})", x, y)
             }
             Term::SigmaElim(a, b, c, d) => {
-                let b = b.as_ref().map(|x|x.0.as_str()).unwrap_or("_");
-                let c = c.as_ref().map(|x|x.0.as_str()).unwrap_or("_");
+                let b = b.as_ref().map(|x| x.0.as_str()).unwrap_or("_");
+                let c = c.as_ref().map(|x| x.0.as_str()).unwrap_or("_");
                 write!(f, "(let ({}, {}) = {} in {})", b, c, a, d)
             }
         }
@@ -844,77 +836,78 @@ mod test {
         }
     }
 
-    #[test]
-    fn test_func_def() {
-        let source = r#"
+    macro_rules! test_source_parsing {
+        ($name:ident, $src:literal) => {
+            #[test]
+            fn $name() {
+                parse_from_source($src);
+            }
+        };
+    }
+
+    test_source_parsing!(
+        test_func_def,
+        r#"
     module Test
 
     myType : Type
     myType = Bool
 
     test : myType -> myType -> `Sigma myType, myType
-    test x = let u = lambda y . (@Pair x y) in u
-"#;
-        parse_from_source(source);
-    }
+    test x = let u = lambda y . (@Pair x y) in u"#
+    );
 
-    #[test]
-    fn test_match_unit() {
-        let source = r#"
+    test_source_parsing!(
+        test_match_unit,
+        r#"
     module Test
     test : Unit -> Bool
     test x = case x of {
         Unit -> !!;
-    } 
-"#;
-        parse_from_source(source);
-    }
+    }"#
+    );
 
-    #[test]
-    fn test_match_bottom() {
-        let source = r#"
+    test_source_parsing!(
+        test_match_bottom,
+        r#"
     module Test
     test : Bottom -> Bool
-    test x = case x of {} 
-"#;
-        parse_from_source(source);
-    }
+    test x = case x of {}
+    "#
+    );
 
-    #[test]
-    fn test_match_pair() {
-        let source = r#"
+    test_source_parsing!(
+        test_match_pair,
+        r#"
     module Test
     test : (`Sigma Bool, Bool) -> Bool
     test x = case x of {
         Pair l _ -> l;
-    } 
-"#;
-        parse_from_source(source);
     }
+    "#
+    );
 
-    #[test]
-    fn test_match_bool() {
-        let source = r#"
+    test_source_parsing!(
+        test_match_bool,
+        r#"
     module Test
     test : Bool -> Type
     test x = case x of {
         True -> Unit;
         False -> Bottom;
-    } 
-"#;
-        parse_from_source(source);
     }
+    "#
+    );
 
-    #[test]
-    fn test_type_level() {
-        let source = r#"
+    test_source_parsing!(
+        test_type_level,
+        r#"
     module Test
     test : (Type -> Bool -> Type) -> Bool -> Type
     test check x = case x of {
         True -> `Pi (i : Bool), let u : Type ~= (check u i) in u;
         False -> `Sigma (i : Bool), (check Bool i);
-    } 
-"#;
-        parse_from_source(source);
     }
+    "#
+    );
 }

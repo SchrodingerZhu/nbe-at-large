@@ -190,18 +190,12 @@ mod implementation {
         let name = parse_literal(Token::SmallCase);
         let params = parse_parameter().repeated();
         let consume_equal = just(Token::Equal);
-        name.then(params).then_ignore(consume_equal).then(expr).map_with_span(
-            |((name, params), body), span| {
-                Ptr::new(
-                    span.span,
-                    FuncDefine {
-                        name,
-                        params,
-                        body,
-                    },
-                )
-            },
-        )
+        name.then(params)
+            .then_ignore(consume_equal)
+            .then(expr)
+            .map_with_span(|((name, params), body), span| {
+                Ptr::new(span.span, FuncDefine { name, params, body })
+            })
     }
 
     fn parse_literal<'a>(token: Token) -> impl Parse<'a> {
