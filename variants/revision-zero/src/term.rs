@@ -645,7 +645,47 @@ impl Term {
     }
 }
 
+struct EvaluationContext {
+    // TODO: fix this
+}
+
 impl Term {
+    fn whnf(ctx: &EvaluationContext, tree: RcPtr<Self>) -> RcPtr<Self> {
+        match tree.data.as_ref() {
+            Term::Type => tree,
+            Term::Variable(_) => tree, // TODO: fix this
+            Term::Lam(_, _) => tree,
+            Term::App(x, y) => {
+                let nf = Term::whnf(ctx, x.clone());
+                match nf.data.as_ref() {
+                    Term::Lam(name, body) => {
+                        let body = match name {
+                            None => body.clone(),
+                            Some(name) => Term::instantiate(body.clone(), [(name.clone(), y.clone())].into_iter())
+                        }; 
+                        Term::whnf(ctx, body)
+                    }
+                    _ if Rc::ptr_eq(&x.data, &nf.data) => tree,
+                    _ => RcPtr::new(tree.location, Term::App(nf, y.clone()))
+                }
+            },
+            Term::Pi(_, _) => tree,
+            Term::Ann(x, _) => x.clone(),
+            Term::Let(_, _, _) => tree,
+            Term::TrustMe => tree,
+            Term::BottomType => todo!(),
+            Term::BottomElim(_) => todo!(),
+            Term::UnitType => todo!(),
+            Term::UnitIntro => todo!(),
+            Term::UnitElim(_, _) => todo!(),
+            Term::BoolType => todo!(),
+            Term::BoolIntro(_) => todo!(),
+            Term::BoolElim(_, _, _) => todo!(),
+            Term::SigmaType(_, _) => todo!(),
+            Term::SigmaIntro(_, _) => todo!(),
+            Term::SigmaElim(_, _, _, _) => todo!(),
+        }
+    }
     fn instantiate<I>(tree: RcPtr<Self>, iter: I) -> RcPtr<Self>
     where
         I: Iterator<Item = (Name, RcPtr<Self>)>,
