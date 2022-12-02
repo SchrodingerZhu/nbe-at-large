@@ -646,176 +646,137 @@ impl Term {
 }
 
 impl Term {
-    fn build_euler_index(
-        &self,
-        counter: &mut usize,
-        node_table: &mut HashMap<*const Self, Range<usize>>,
-        variable_table: &mut HashMap<Name, Vec<Range<usize>>>,
-    ) {
-        *counter += 1;
-        let first = *counter;
-        let mut variable = None;
-        match self {
-            Term::Type
-            | Term::TrustMe
-            | Term::BottomType
-            | Term::UnitType
-            | Term::UnitIntro
-            | Term::BoolType
-            | Term::BoolIntro(_) => (),
-            Term::Variable(name) => {
-                variable.replace(name.clone());
-            }
-            Term::App(x, y)
-            | Term::Pi(x, y)
-            | Term::Ann(x, y)
-            | Term::UnitElim(x, y)
-            | Term::SigmaType(x, y)
-            | Term::SigmaIntro(x, y)
-            | Term::Let(_, x, y)
-            | Term::SigmaElim(x, _, _, y) => {
-                x.build_euler_index(counter, node_table, variable_table);
-                y.build_euler_index(counter, node_table, variable_table);
-            }
-            Term::BottomElim(x) | Term::Lam(_, x) => {
-                x.build_euler_index(counter, node_table, variable_table);
-            }
-            Term::BoolElim(x, y, z) => {
-                x.build_euler_index(counter, node_table, variable_table);
-                y.build_euler_index(counter, node_table, variable_table);
-                z.build_euler_index(counter, node_table, variable_table);
-            }
-        }
-        *counter += 1;
-        node_table.insert(self as _, first..*counter);
-        if let Some(i) = variable {
-            match variable_table.entry(i) {
-                Entry::Occupied(x) => {
-                    x.into_mut().push(first..*counter);
-                }
-                Entry::Vacant(x) => {
-                    x.insert(vec![first..*counter]);
-                }
-            }
-        }
-    }
     fn instantiate<I>(tree: RcPtr<Self>, iter: I) -> RcPtr<Self>
     where
         I: Iterator<Item = (Name, RcPtr<Self>)>,
     {
-        let mut map = HashMap::new();
-        let mut vars = Vec::new();
-        for (k, v) in iter {
-            map.insert(k.clone(), v);
-            vars.push(k);
-        }
-        fn contain_variable(
-            term: &Term,
-            vars: &[Name],
-            node_table: &HashMap<*const Term, Range<usize>>,
-            var_table: &HashMap<Name, Vec<Range<usize>>>,
-        ) -> bool {
-            let range = unsafe { node_table.get(&(term as *const Term)).unwrap_unchecked() };
-            for i in vars {
-                if let Some(x) = var_table.get(i) {
-                    for j in x {
-                        if range.start <= j.start && j.end <= range.end {
-                            return true;
-                        }
-                    }
-                }
-            }
-            false
-        }
-        let mut node_table = HashMap::new();
-        let mut var_table = HashMap::new();
-        let mut counter = 0;
-        tree.build_euler_index(&mut counter, &mut node_table, &mut var_table);
+        let mut map = HashMap::from_iter(iter);
         fn instantiate_with_map(
             tree: RcPtr<Term>,
             map: &HashMap<Name, RcPtr<Term>>,
-            vars: &[Name],
-            node_table: &HashMap<*const Term, Range<usize>>,
-            var_table: &HashMap<Name, Vec<Range<usize>>>,
         ) -> RcPtr<Term> {
-            if !contain_variable(tree.data.as_ref(), vars, node_table, var_table) {
-                return tree;
-            }
             match tree.data.as_ref() {
-                Term::Type => assert_unreachable!(),
+                Term::Type => tree,
                 Term::Variable(a) => {
                     if let Some(tree) = map.get(a).cloned() {
                         tree
                     } else {
-                        assert_unreachable!()
+                        tree
                     }
                 }
-                Term::Lam(a, b) => RcPtr::new(
-                    tree.location,
-                    Term::Lam(
-                        a.clone(),
-                        instantiate_with_map(b.clone(), map, vars, node_table, var_table),
-                    ),
-                ),
+                Term::Lam(x, a) => {
+                    let new_a = instantiate_with_map(a.clone(), map);
+                    if Rc::ptr_eq(&a.data, &new_a.data) {
+                        tree
+                    } else {
+                        RcPtr::new(tree.location, Term::Lam(x.clone(), new_a))
+                    }
+                }
                 Term::App(a, b) => {
-                    let a = instantiate_with_map(a.clone(), map, vars, node_table, var_table);
-                    let b = instantiate_with_map(b.clone(), map, vars, node_table, var_table);
-                    RcPtr::new(tree.location, Term::App(a, b))
+                    let new_a = instantiate_with_map(a.clone(), map);
+                    let new_b = instantiate_with_map(b.clone(), map);
+                    if Rc::ptr_eq(&a.data, &new_a.data) && Rc::ptr_eq(&b.data, &new_b.data) {
+                        tree
+                    } else {
+                        RcPtr::new(tree.location, Term::App(new_a, new_b))
+                    }
                 }
                 Term::Pi(a, b) => {
-                    let a = instantiate_with_map(a.clone(), map, vars, node_table, var_table);
-                    let b = instantiate_with_map(b.clone(), map, vars, node_table, var_table);
-                    RcPtr::new(tree.location, Term::Pi(a, b))
+                    let new_a = instantiate_with_map(a.clone(), map);
+                    let new_b = instantiate_with_map(b.clone(), map);
+                    if Rc::ptr_eq(&a.data, &new_a.data) && Rc::ptr_eq(&b.data, &new_b.data) {
+                        tree
+                    } else {
+                        RcPtr::new(tree.location, Term::Pi(new_a, new_b))
+                    }
                 }
                 Term::Ann(a, b) => {
-                    let a = instantiate_with_map(a.clone(), map, vars, node_table, var_table);
-                    let b = instantiate_with_map(b.clone(), map, vars, node_table, var_table);
-                    RcPtr::new(tree.location, Term::Ann(a, b))
+                    let new_a = instantiate_with_map(a.clone(), map);
+                    let new_b = instantiate_with_map(b.clone(), map);
+                    if Rc::ptr_eq(&a.data, &new_a.data) && Rc::ptr_eq(&b.data, &new_b.data) {
+                        tree
+                    } else {
+                        RcPtr::new(tree.location, Term::Ann(new_a, new_b))
+                    }
                 }
-                Term::Let(a, b, c) => {
-                    let b = instantiate_with_map(b.clone(), map, vars, node_table, var_table);
-                    let c = instantiate_with_map(c.clone(), map, vars, node_table, var_table);
-                    RcPtr::new(tree.location, Term::Let(a.clone(), b, c))
+                Term::Let(x, a, b) => {
+                    let new_a = instantiate_with_map(a.clone(), map);
+                    let new_b = instantiate_with_map(b.clone(), map);
+                    if Rc::ptr_eq(&a.data, &new_a.data) && Rc::ptr_eq(&b.data, &new_b.data) {
+                        tree
+                    } else {
+                        RcPtr::new(tree.location, Term::Let(x.clone(), new_a, new_b))
+                    }
                 }
-                Term::TrustMe => assert_unreachable!(),
-                Term::BottomType => assert_unreachable!(),
-                Term::BottomElim(x) => {
-                    let x = instantiate_with_map(x.clone(), map, vars, node_table, var_table);
-                    RcPtr::new(tree.location, Term::BottomElim(x))
+                Term::TrustMe => tree,
+                Term::BottomType => tree,
+                Term::BottomElim(a) => {
+                    let new_a = instantiate_with_map(a.clone(), map);
+                    if Rc::ptr_eq(&a.data, &new_a.data) {
+                        tree
+                    } else {
+                        RcPtr::new(tree.location, Term::BottomElim(new_a))
+                    }
                 }
-                Term::UnitType => assert_unreachable!(),
-                Term::UnitIntro => assert_unreachable!(),
+                Term::UnitType => tree,
+                Term::UnitIntro => tree,
                 Term::UnitElim(a, b) => {
-                    let a = instantiate_with_map(a.clone(), map, vars, node_table, var_table);
-                    let b = instantiate_with_map(b.clone(), map, vars, node_table, var_table);
-                    RcPtr::new(tree.location, Term::UnitElim(a, b))
+                    let new_a = instantiate_with_map(a.clone(), map);
+                    let new_b = instantiate_with_map(b.clone(), map);
+                    if Rc::ptr_eq(&a.data, &new_a.data) && Rc::ptr_eq(&b.data, &new_b.data) {
+                        tree
+                    } else {
+                        RcPtr::new(tree.location, Term::UnitElim(new_a, new_b))
+                    }
                 }
-                Term::BoolType => assert_unreachable!(),
-                Term::BoolIntro(_) => assert_unreachable!(),
+                Term::BoolType => tree,
+                Term::BoolIntro(_) => tree,
                 Term::BoolElim(a, b, c) => {
-                    let a = instantiate_with_map(a.clone(), map, vars, node_table, var_table);
-                    let b = instantiate_with_map(b.clone(), map, vars, node_table, var_table);
-                    let c = instantiate_with_map(c.clone(), map, vars, node_table, var_table);
-                    RcPtr::new(tree.location, Term::BoolElim(a, b, c))
+                    let new_a = instantiate_with_map(a.clone(), map);
+                    let new_b = instantiate_with_map(b.clone(), map);
+                    let new_c = instantiate_with_map(c.clone(), map);
+                    if Rc::ptr_eq(&a.data, &new_a.data)
+                        && Rc::ptr_eq(&b.data, &new_b.data)
+                        && Rc::ptr_eq(&c.data, &new_c.data)
+                    {
+                        tree
+                    } else {
+                        RcPtr::new(tree.location, Term::BoolElim(new_a, new_b, new_c))
+                    }
                 }
                 Term::SigmaType(a, b) => {
-                    let a = instantiate_with_map(a.clone(), map, vars, node_table, var_table);
-                    let b = instantiate_with_map(b.clone(), map, vars, node_table, var_table);
-                    RcPtr::new(tree.location, Term::SigmaType(a, b))
+                    let new_a = instantiate_with_map(a.clone(), map);
+                    let new_b = instantiate_with_map(b.clone(), map);
+                    if Rc::ptr_eq(&a.data, &new_a.data) && Rc::ptr_eq(&b.data, &new_b.data) {
+                        tree
+                    } else {
+                        RcPtr::new(tree.location, Term::SigmaType(new_a, new_b))
+                    }
                 }
                 Term::SigmaIntro(a, b) => {
-                    let a = instantiate_with_map(a.clone(), map, vars, node_table, var_table);
-                    let b = instantiate_with_map(b.clone(), map, vars, node_table, var_table);
-                    RcPtr::new(tree.location, Term::SigmaType(a, b))
+                    let new_a = instantiate_with_map(a.clone(), map);
+                    let new_b = instantiate_with_map(b.clone(), map);
+                    if Rc::ptr_eq(&a.data, &new_a.data) && Rc::ptr_eq(&b.data, &new_b.data) {
+                        tree
+                    } else {
+                        RcPtr::new(tree.location, Term::SigmaIntro(new_a, new_b))
+                    }
                 }
-                Term::SigmaElim(a, b, c, d) => {
-                    let a = instantiate_with_map(a.clone(), map, vars, node_table, var_table);
-                    let d = instantiate_with_map(d.clone(), map, vars, node_table, var_table);
-                    RcPtr::new(tree.location, Term::SigmaElim(a, b.clone(), c.clone(), d))
+                Term::SigmaElim(a, x, y, b) => {
+                    let new_a = instantiate_with_map(a.clone(), map);
+                    let new_b = instantiate_with_map(b.clone(), map);
+                    if Rc::ptr_eq(&a.data, &new_a.data) && Rc::ptr_eq(&b.data, &new_b.data) {
+                        tree
+                    } else {
+                        RcPtr::new(
+                            tree.location,
+                            Term::SigmaElim(new_a, x.clone(), y.clone(), new_b),
+                        )
+                    }
                 }
             }
         }
-        instantiate_with_map(tree, &map, &vars, &node_table, &var_table)
+        instantiate_with_map(tree, &map)
     }
 }
 
