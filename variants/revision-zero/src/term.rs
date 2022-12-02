@@ -671,19 +671,51 @@ impl Term {
             },
             Term::Pi(_, _) => tree,
             Term::Ann(x, _) => x.clone(),
-            Term::Let(_, _, _) => tree,
+            Term::Let(_, _, _) => tree, // why not translate this?
             Term::TrustMe => tree,
-            Term::BottomType => todo!(),
-            Term::BottomElim(_) => todo!(),
-            Term::UnitType => todo!(),
-            Term::UnitIntro => todo!(),
-            Term::UnitElim(_, _) => todo!(),
-            Term::BoolType => todo!(),
-            Term::BoolIntro(_) => todo!(),
-            Term::BoolElim(_, _, _) => todo!(),
-            Term::SigmaType(_, _) => todo!(),
-            Term::SigmaIntro(_, _) => todo!(),
-            Term::SigmaElim(_, _, _, _) => todo!(),
+            Term::BottomType => tree,
+            Term::BottomElim(_) => tree,
+            Term::UnitType => tree,
+            Term::UnitIntro => tree,
+            Term::UnitElim(x, y) => {
+                let nf = Term::whnf(ctx, x.clone());
+                match nf.data.as_ref() {
+                    Term::UnitIntro => Term::whnf(ctx, y.clone()),
+                    _ if Rc::ptr_eq(&nf.data, &x.data) => tree,
+                    _ => RcPtr::new(tree.location, Term::UnitElim(nf, y.clone()))
+                }
+            },
+            Term::BoolType => tree,
+            Term::BoolIntro(_) => tree,
+            Term::BoolElim(x, y, z) => {
+                let nf = Term::whnf(ctx, x.clone());
+                match nf.data.as_ref() {
+                    Term::BoolIntro(true) => Term::whnf(ctx, y.clone()),
+                    Term::BoolIntro(false) => Term::whnf(ctx, z.clone()),
+                    _ if Rc::ptr_eq(&nf.data, &x.data) => tree,
+                    _ => RcPtr::new(tree.location, Term::BoolElim(nf, y.clone(), z.clone()))
+                }
+            },
+            Term::SigmaType(_, _) => tree,
+            Term::SigmaIntro(_, _) => tree,
+            Term::SigmaElim(x, a, b, y) => {
+                let nf = Term::whnf(ctx, x.clone());
+                match nf.data.as_ref() {
+                    Term::SigmaIntro(av, bv) => {
+                        let mut vars = Vec::new();
+                        if let Some(name) = a {
+                            vars.push((name.clone(), av.clone()));
+                        }
+                        if let Some(name) = b {
+                            vars.push((name.clone(), bv.clone()));
+                        }
+                        let y = Term::instantiate(y.clone(), vars.into_iter());
+                        Term::whnf(ctx, y)
+                    }
+                    _ if Rc::ptr_eq(&nf.data, &x.data) => tree,
+                    _ => RcPtr::new(tree.location, Term::SigmaElim(nf, a.clone(), b.clone(), y.clone()))
+                }
+            },
         }
     }
     fn instantiate<I>(tree: RcPtr<Self>, iter: I) -> RcPtr<Self>
@@ -1035,6 +1067,34 @@ mod test {
                         [(name.clone().unwrap(), target)].into_iter(),
                     );
                     assert_eq!(format!("{}", result), "(𝟚-elim True (let u = True in (((λ fresh_0 . (λ fresh_1 . (fresh_0 , fresh_1))) u) True)) (((λ fresh_2 . (λ fresh_3 . (fresh_2 , fresh_3))) True) True))")
+                }
+                _ => unreachable!(),
+            },
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn test_whnf() {
+        let source = r#"
+        module Test
+        test : Bool -> (`Sigma Bool, Bool)
+        test x = case x of {
+            True -> let u = x in (@Pair u x);
+            False -> (@Pair x x);
+        } 
+        "#;
+        let definitions = get_definitions(source);
+        let tree = definitions.first().unwrap().term.clone();
+        match tree.data.as_ref() {
+            Term::Ann(x, _) => match x.data.as_ref() {
+                Term::Lam(name, body) => {
+                    let target = RcPtr::new(0..0, Term::BoolIntro(true));
+                    let result = Term::instantiate(
+                        body.clone(),
+                        [(name.clone().unwrap(), target)].into_iter(),
+                    );
+                    println!("{}", Term::whnf(&super::EvaluationContext {  }, result))
                 }
                 _ => unreachable!(),
             },
