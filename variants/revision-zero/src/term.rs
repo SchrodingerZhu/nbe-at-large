@@ -671,7 +671,13 @@ impl Term {
             },
             Term::Pi(_, _) => tree,
             Term::Ann(x, _) => x.clone(),
-            Term::Let(_, _, _) => tree, // why not translate this?
+            Term::Let(x, a, b) => {
+                let b = match x {
+                    Some(x) => Term::instantiate(b.clone(),  [(x.clone(), a.clone())].into_iter()),
+                    None => b.clone()
+                };
+                Term::whnf(ctx, b)
+            },
             Term::TrustMe => tree,
             Term::BottomType => tree,
             Term::BottomElim(_) => tree,
