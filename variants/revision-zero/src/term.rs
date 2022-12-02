@@ -661,23 +661,26 @@ impl Term {
                     Term::Lam(name, body) => {
                         let body = match name {
                             None => body.clone(),
-                            Some(name) => Term::instantiate(body.clone(), [(name.clone(), y.clone())].into_iter())
-                        }; 
+                            Some(name) => Term::instantiate(
+                                body.clone(),
+                                [(name.clone(), y.clone())].into_iter(),
+                            ),
+                        };
                         Term::whnf(ctx, body)
                     }
                     _ if Rc::ptr_eq(&x.data, &nf.data) => tree,
-                    _ => RcPtr::new(tree.location, Term::App(nf, y.clone()))
+                    _ => RcPtr::new(tree.location, Term::App(nf, y.clone())),
                 }
-            },
+            }
             Term::Pi(_, _) => tree,
             Term::Ann(x, _) => x.clone(),
             Term::Let(x, a, b) => {
                 let b = match x {
-                    Some(x) => Term::instantiate(b.clone(),  [(x.clone(), a.clone())].into_iter()),
-                    None => b.clone()
+                    Some(x) => Term::instantiate(b.clone(), [(x.clone(), a.clone())].into_iter()),
+                    None => b.clone(),
                 };
                 Term::whnf(ctx, b)
-            },
+            }
             Term::TrustMe => tree,
             Term::BottomType => tree,
             Term::BottomElim(_) => tree,
@@ -688,9 +691,9 @@ impl Term {
                 match nf.data.as_ref() {
                     Term::UnitIntro => Term::whnf(ctx, y.clone()),
                     _ if Rc::ptr_eq(&nf.data, &x.data) => tree,
-                    _ => RcPtr::new(tree.location, Term::UnitElim(nf, y.clone()))
+                    _ => RcPtr::new(tree.location, Term::UnitElim(nf, y.clone())),
                 }
-            },
+            }
             Term::BoolType => tree,
             Term::BoolIntro(_) => tree,
             Term::BoolElim(x, y, z) => {
@@ -699,9 +702,9 @@ impl Term {
                     Term::BoolIntro(true) => Term::whnf(ctx, y.clone()),
                     Term::BoolIntro(false) => Term::whnf(ctx, z.clone()),
                     _ if Rc::ptr_eq(&nf.data, &x.data) => tree,
-                    _ => RcPtr::new(tree.location, Term::BoolElim(nf, y.clone(), z.clone()))
+                    _ => RcPtr::new(tree.location, Term::BoolElim(nf, y.clone(), z.clone())),
                 }
-            },
+            }
             Term::SigmaType(_, _) => tree,
             Term::SigmaIntro(_, _) => tree,
             Term::SigmaElim(x, a, b, y) => {
@@ -719,9 +722,12 @@ impl Term {
                         Term::whnf(ctx, y)
                     }
                     _ if Rc::ptr_eq(&nf.data, &x.data) => tree,
-                    _ => RcPtr::new(tree.location, Term::SigmaElim(nf, a.clone(), b.clone(), y.clone()))
+                    _ => RcPtr::new(
+                        tree.location,
+                        Term::SigmaElim(nf, a.clone(), b.clone(), y.clone()),
+                    ),
                 }
-            },
+            }
         }
     }
     fn instantiate<I>(tree: RcPtr<Self>, iter: I) -> RcPtr<Self>
@@ -1100,7 +1106,7 @@ mod test {
                         body.clone(),
                         [(name.clone().unwrap(), target)].into_iter(),
                     );
-                    println!("{}", Term::whnf(&super::EvaluationContext {  }, result))
+                    println!("{}", Term::whnf(&super::EvaluationContext {}, result))
                 }
                 _ => unreachable!(),
             },
