@@ -155,8 +155,8 @@ pub enum Term {
 
 #[derive(Debug)]
 pub struct Definition {
-    name: Name,
-    term: RcPtr<Term>,
+    pub name: Name,
+    pub term: RcPtr<Term>,
 }
 
 impl Definition {
@@ -820,7 +820,7 @@ fn scan_module_definitions<'tree, 'src: 'tree>(
 #[cfg(test)]
 mod test {
     use super::Definition;
-    fn parse_from_source(source: &str) {
+    fn parse_from_source(source: &str, num: usize) {
         let parse_tree = grammar::syntactic::parse(source).1;
         eprintln!("{:#?}", parse_tree);
         let parse_tree = grammar::syntactic::parse(source).0.unwrap();
@@ -830,6 +830,7 @@ mod test {
                 .unwrap();
         }
         {
+            assert_eq!(definitions.0.len(), num);
             for i in definitions.0 {
                 println!("{} = {}", i.name.0, i.term)
             }
@@ -838,15 +839,18 @@ mod test {
 
     macro_rules! test_source_parsing {
         ($name:ident, $src:literal) => {
+            test_source_parsing!($name, 1, $src);
+        };
+        ($name:ident, $num:expr, $src:literal) => {
             #[test]
             fn $name() {
-                parse_from_source($src);
+                parse_from_source($src, $num);
             }
         };
     }
 
     test_source_parsing!(
-        test_func_def,
+        test_func_def, 2, 
         r#"
     module Test
 
@@ -858,7 +862,7 @@ mod test {
     );
 
     test_source_parsing!(
-        test_match_unit,
+        test_match_unit, 
         r#"
     module Test
     test : Unit -> Bool
