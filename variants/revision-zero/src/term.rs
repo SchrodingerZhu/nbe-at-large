@@ -650,7 +650,7 @@ impl Term {
     where
         I: Iterator<Item = (Name, RcPtr<Self>)>,
     {
-        let mut map = HashMap::from_iter(iter);
+        let map = HashMap::from_iter(iter);
         fn instantiate_with_map(
             tree: RcPtr<Term>,
             map: &HashMap<Name, RcPtr<Term>>,
