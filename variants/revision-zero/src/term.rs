@@ -9,7 +9,7 @@ use std::hash::{Hash, Hasher};
 use std::ops::Range;
 use std::{collections::HashMap, rc::Rc};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq)]
 #[repr(transparent)]
 pub struct Name(Rc<String>);
 
@@ -31,10 +31,19 @@ impl Name {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct RcPtr<T> {
     location: Range<usize>,
     data: Rc<T>,
+}
+
+impl<T> Clone for RcPtr<T> {
+    fn clone(&self) -> Self {
+        Self {
+            location: self.location.clone(),
+            data: self.data.clone(),
+        }
+    }
 }
 
 impl<T> RcPtr<T> {
@@ -636,30 +645,177 @@ impl Term {
     }
 }
 
-trait AlphaEq {
-    fn alpha_equal(&self, y: &Self) -> bool;
-}
-
-trait Subst: Sized {
-    fn substitute(&self, name: &Name, with: &Self) -> Ptr<Self>;
-}
-
-#[test]
-fn test() {
-    let source = r#"
-    module Test
-    import A
-    import B
-    data List (a : Type) = {
-        Nil : (List a);
-        Cons : a -> (List a) -> (List a);
+impl Term {
+    fn build_euler_index(
+        &self,
+        counter: &mut usize,
+        node_table: &mut HashMap<*const Self, Range<usize>>,
+        variable_table: &mut HashMap<Name, Vec<Range<usize>>>,
+    ) {
+        *counter += 1;
+        let first = *counter;
+        let mut variable = None;
+        match self {
+            Term::Type
+            | Term::TrustMe
+            | Term::BottomType
+            | Term::UnitType
+            | Term::UnitIntro
+            | Term::BoolType
+            | Term::BoolIntro(_) => (),
+            Term::Variable(name) => {
+                variable.replace(name.clone());
+            }
+            Term::App(x, y)
+            | Term::Pi(x, y)
+            | Term::Ann(x, y)
+            | Term::UnitElim(x, y)
+            | Term::SigmaType(x, y)
+            | Term::SigmaIntro(x, y)
+            | Term::Let(_, x, y)
+            | Term::SigmaElim(x, _, _, y) => {
+                x.build_euler_index(counter, node_table, variable_table);
+                y.build_euler_index(counter, node_table, variable_table);
+            }
+            Term::BottomElim(x) | Term::Lam(_, x) => {
+                x.build_euler_index(counter, node_table, variable_table);
+            }
+            Term::BoolElim(x, y, z) => {
+                x.build_euler_index(counter, node_table, variable_table);
+                y.build_euler_index(counter, node_table, variable_table);
+                z.build_euler_index(counter, node_table, variable_table);
+            }
+        }
+        *counter += 1;
+        node_table.insert(self as _, first..*counter);
+        if let Some(i) = variable {
+            match variable_table.entry(i) {
+                Entry::Occupied(x) => {
+                    x.into_mut().push(first..*counter);
+                }
+                Entry::Vacant(x) => {
+                    x.insert(vec![first..*counter]);
+                }
+            }
+        }
     }
-"#;
-    let parse_tree = grammar::syntactic::parse(source).0.unwrap();
-    let (_, reports) = Definition::new_from_module("source.txt", &parse_tree);
-    for i in reports.iter() {
-        i.eprint(("source.txt", ariadne::Source::from(source)))
-            .unwrap();
+    fn instantiate<I>(tree: RcPtr<Self>, iter: I) -> RcPtr<Self>
+    where
+        I: Iterator<Item = (Name, RcPtr<Self>)>,
+    {
+        let mut map = HashMap::new();
+        let mut vars = Vec::new();
+        for (k, v) in iter {
+            map.insert(k.clone(), v);
+            vars.push(k);
+        }
+        fn contain_variable(
+            term: &Term,
+            vars: &[Name],
+            node_table: &HashMap<*const Term, Range<usize>>,
+            var_table: &HashMap<Name, Vec<Range<usize>>>,
+        ) -> bool {
+            let range = unsafe { node_table.get(&(term as *const Term)).unwrap_unchecked() };
+            for i in vars {
+                if let Some(x) = var_table.get(i) {
+                    for j in x {
+                        if range.start <= j.start && j.end <= range.end {
+                            return true;
+                        }
+                    }
+                }
+            }
+            false
+        }
+        let mut node_table = HashMap::new();
+        let mut var_table = HashMap::new();
+        let mut counter = 0;
+        tree.build_euler_index(&mut counter, &mut node_table, &mut var_table);
+        fn instantiate_with_map(
+            tree: RcPtr<Term>,
+            map: &HashMap<Name, RcPtr<Term>>,
+            vars: &[Name],
+            node_table: &HashMap<*const Term, Range<usize>>,
+            var_table: &HashMap<Name, Vec<Range<usize>>>,
+        ) -> RcPtr<Term> {
+            if !contain_variable(tree.data.as_ref(), vars, node_table, var_table) {
+                return tree;
+            }
+            match tree.data.as_ref() {
+                Term::Type => assert_unreachable!(),
+                Term::Variable(a) => {
+                    if let Some(tree) = map.get(a).cloned() {
+                        tree
+                    } else {
+                        assert_unreachable!()
+                    }
+                }
+                Term::Lam(a, b) => RcPtr::new(
+                    tree.location,
+                    Term::Lam(
+                        a.clone(),
+                        instantiate_with_map(b.clone(), map, vars, node_table, var_table),
+                    ),
+                ),
+                Term::App(a, b) => {
+                    let a = instantiate_with_map(a.clone(), map, vars, node_table, var_table);
+                    let b = instantiate_with_map(b.clone(), map, vars, node_table, var_table);
+                    RcPtr::new(tree.location, Term::App(a, b))
+                }
+                Term::Pi(a, b) => {
+                    let a = instantiate_with_map(a.clone(), map, vars, node_table, var_table);
+                    let b = instantiate_with_map(b.clone(), map, vars, node_table, var_table);
+                    RcPtr::new(tree.location, Term::Pi(a, b))
+                }
+                Term::Ann(a, b) => {
+                    let a = instantiate_with_map(a.clone(), map, vars, node_table, var_table);
+                    let b = instantiate_with_map(b.clone(), map, vars, node_table, var_table);
+                    RcPtr::new(tree.location, Term::Ann(a, b))
+                }
+                Term::Let(a, b, c) => {
+                    let b = instantiate_with_map(b.clone(), map, vars, node_table, var_table);
+                    let c = instantiate_with_map(c.clone(), map, vars, node_table, var_table);
+                    RcPtr::new(tree.location, Term::Let(a.clone(), b, c))
+                }
+                Term::TrustMe => assert_unreachable!(),
+                Term::BottomType => assert_unreachable!(),
+                Term::BottomElim(x) => {
+                    let x = instantiate_with_map(x.clone(), map, vars, node_table, var_table);
+                    RcPtr::new(tree.location, Term::BottomElim(x))
+                }
+                Term::UnitType => assert_unreachable!(),
+                Term::UnitIntro => assert_unreachable!(),
+                Term::UnitElim(a, b) => {
+                    let a = instantiate_with_map(a.clone(), map, vars, node_table, var_table);
+                    let b = instantiate_with_map(b.clone(), map, vars, node_table, var_table);
+                    RcPtr::new(tree.location, Term::UnitElim(a, b))
+                }
+                Term::BoolType => assert_unreachable!(),
+                Term::BoolIntro(_) => assert_unreachable!(),
+                Term::BoolElim(a, b, c) => {
+                    let a = instantiate_with_map(a.clone(), map, vars, node_table, var_table);
+                    let b = instantiate_with_map(b.clone(), map, vars, node_table, var_table);
+                    let c = instantiate_with_map(c.clone(), map, vars, node_table, var_table);
+                    RcPtr::new(tree.location, Term::BoolElim(a, b, c))
+                }
+                Term::SigmaType(a, b) => {
+                    let a = instantiate_with_map(a.clone(), map, vars, node_table, var_table);
+                    let b = instantiate_with_map(b.clone(), map, vars, node_table, var_table);
+                    RcPtr::new(tree.location, Term::SigmaType(a, b))
+                }
+                Term::SigmaIntro(a, b) => {
+                    let a = instantiate_with_map(a.clone(), map, vars, node_table, var_table);
+                    let b = instantiate_with_map(b.clone(), map, vars, node_table, var_table);
+                    RcPtr::new(tree.location, Term::SigmaType(a, b))
+                }
+                Term::SigmaElim(a, b, c, d) => {
+                    let a = instantiate_with_map(a.clone(), map, vars, node_table, var_table);
+                    let d = instantiate_with_map(d.clone(), map, vars, node_table, var_table);
+                    RcPtr::new(tree.location, Term::SigmaElim(a, b.clone(), c.clone(), d))
+                }
+            }
+        }
+        instantiate_with_map(tree, &map, &vars, &node_table, &var_table)
     }
 }
 
@@ -819,19 +975,27 @@ fn scan_module_definitions<'tree, 'src: 'tree>(
 }
 #[cfg(test)]
 mod test {
-    use super::Definition;
-    fn parse_from_source(source: &str, num: usize) {
-        let parse_tree = grammar::syntactic::parse(source).1;
-        eprintln!("{:#?}", parse_tree);
-        let parse_tree = grammar::syntactic::parse(source).0.unwrap();
+    use super::{Definition, RcPtr, Term};
+
+    fn get_definitions(source: &str) -> Vec<Definition> {
+        let parse = grammar::syntactic::parse(source);
+        let parse_errs = parse.1;
+        for i in parse_errs {
+            println!("{:?}", i);
+        }
+        let parse_tree = parse.0.unwrap();
         let definitions = Definition::new_from_module("source.txt", &parse_tree);
         for i in definitions.1.iter() {
             i.eprint(("source.txt", ariadne::Source::from(source)))
                 .unwrap();
         }
+        definitions.0
+    }
+    fn parse_from_source(source: &str, num: usize) {
+        let definitions = get_definitions(source);
         {
-            assert_eq!(definitions.0.len(), num);
-            for i in definitions.0 {
+            assert_eq!(definitions.len(), num);
+            for i in definitions {
                 println!("{} = {}", i.name.0, i.term)
             }
         }
@@ -849,8 +1013,48 @@ mod test {
         };
     }
 
+    #[test]
+    fn test_instantiate() {
+        let source = r#"
+        module Test
+        test : Bool -> (`Sigma Bool, Bool)
+        test x = case x of {
+            True -> let u = x in (@Pair u x);
+            False -> (@Pair x x);
+        } 
+        "#;
+        let definitions = get_definitions(source);
+        let tree = definitions.first().unwrap().term.clone();
+        match tree.data.as_ref() {
+            Term::Ann(x, _) => match x.data.as_ref() {
+                Term::Lam(name, body) => {
+                    let target = RcPtr::new(0..0, Term::BoolIntro(true));
+                    let result = Term::instantiate(
+                        body.clone(),
+                        [(name.clone().unwrap(), target)].into_iter(),
+                    );
+                    assert_eq!(format!("{}", result), "(𝟚-elim True (let u = True in (((λ fresh_0 . (λ fresh_1 . (fresh_0 , fresh_1))) u) True)) (((λ fresh_2 . (λ fresh_3 . (fresh_2 , fresh_3))) True) True))")
+                }
+                _ => unreachable!(),
+            },
+            _ => unreachable!(),
+        }
+    }
+
+    test_source_parsing! {
+        test_warning, 0,
+        r#"
+    module Test
+    import A
+    import B
+    data List (a : Type) = {
+        Nil : (List a);
+        Cons : a -> (List a) -> (List a);
+    }"#}
+
     test_source_parsing!(
-        test_func_def, 2, 
+        test_func_def,
+        2,
         r#"
     module Test
 
@@ -862,7 +1066,7 @@ mod test {
     );
 
     test_source_parsing!(
-        test_match_unit, 
+        test_match_unit,
         r#"
     module Test
     test : Unit -> Bool
