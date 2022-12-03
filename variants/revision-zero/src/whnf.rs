@@ -100,8 +100,6 @@ impl WeakHeadNF for Term {
 
 #[cfg(test)]
 mod test {
-    use std::hash::Hash;
-
     use super::*;
     #[test]
     fn test_whnf() {
