@@ -1,6 +1,6 @@
 use crate::instantiation::Instantiation;
 use crate::term::{Name, RcPtr, Term};
-use std::{collections::HashMap, rc::Rc};
+use std::rc::Rc;
 pub trait WeakHeadNF: Sized {
     type Wrapper<T>;
     type Name;
