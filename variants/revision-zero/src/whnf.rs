@@ -114,20 +114,15 @@ mod test {
         let definitions = crate::term::test::get_definitions(source);
         let tree = definitions.first().unwrap().term.clone();
         match tree.data.as_ref() {
-            Term::Ann(x, _) => match x.data.as_ref() {
-                Term::Lam(name, body) => {
-                    let target = RcPtr::new(0..0, Term::BoolIntro(true));
-                    let result = Term::instantiate(
-                        body.clone(),
-                        [(name.clone().unwrap(), target)].into_iter(),
-                    );
-                    assert_eq!(
-                        "(True , True)",
-                        format!("{}", Term::whnf(&HashMap::new(), result))
-                    )
-                }
-                _ => unreachable!(),
-            },
+            Term::Lam(name, body) => {
+                let target = RcPtr::new(0..0, Term::BoolIntro(true));
+                let result =
+                    Term::instantiate(body.clone(), [(name.clone().unwrap(), target)].into_iter());
+                assert_eq!(
+                    "(True , True)",
+                    format!("{}", Term::whnf(&HashMap::new(), result))
+                )
+            }
             _ => unreachable!(),
         }
     }

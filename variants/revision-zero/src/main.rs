@@ -2,8 +2,10 @@
 #![feature(associated_type_defaults)]
 mod alpha_equality;
 mod builtin;
+mod equalization;
 mod instantiation;
 mod term;
+mod typecheck;
 mod whnf;
 
 #[macro_export]

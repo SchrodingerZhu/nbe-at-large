@@ -166,6 +166,7 @@ pub enum Term {
 pub struct Definition {
     pub name: Name,
     pub term: RcPtr<Term>,
+    pub signature: RcPtr<Term>,
 }
 
 impl Definition {
@@ -189,12 +190,15 @@ impl Definition {
                         let type_tree = unsafe { i.0.as_ref().unwrap_unchecked() };
                         let def_tree = unsafe { i.1.as_ref().unwrap_unchecked() };
                         let term = Term::new_from_expr(&context, type_tree).and_then(|decl| {
-                            Term::new_from_function_definition(&context, def_tree).map(move |def| {
-                                RcPtr::new(def_tree.location.clone(), Term::Ann(def, decl))
-                            })
+                            Term::new_from_function_definition(&context, def_tree)
+                                .map(move |def| (def, decl))
                         });
-                        if let Some(term) = term {
-                            definitions.push(Definition { name, term });
+                        if let Some((term, signature)) = term {
+                            definitions.push(Definition {
+                                name,
+                                term,
+                                signature,
+                            });
                         }
                     }
                 }

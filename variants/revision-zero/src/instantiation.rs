@@ -166,17 +166,12 @@ mod test {
         let definitions = crate::term::test::get_definitions(source);
         let tree = definitions.first().unwrap().term.clone();
         match tree.data.as_ref() {
-            Term::Ann(x, _) => match x.data.as_ref() {
-                Term::Lam(name, body) => {
-                    let target = RcPtr::new(0..0, Term::BoolIntro(true));
-                    let result = Term::instantiate(
-                        body.clone(),
-                        [(name.clone().unwrap(), target)].into_iter(),
-                    );
-                    assert_eq!(format!("{}", result), "(𝟚-elim True (let u = True in (((λ fresh_0 . (λ fresh_1 . (fresh_0 , fresh_1))) u) True)) (((λ fresh_2 . (λ fresh_3 . (fresh_2 , fresh_3))) True) True))")
-                }
-                _ => unreachable!(),
-            },
+            Term::Lam(name, body) => {
+                let target = RcPtr::new(0..0, Term::BoolIntro(true));
+                let result =
+                    Term::instantiate(body.clone(), [(name.clone().unwrap(), target)].into_iter());
+                assert_eq!(format!("{}", result), "(𝟚-elim True (let u = True in (((λ fresh_0 . (λ fresh_1 . (fresh_0 , fresh_1))) u) True)) (((λ fresh_2 . (λ fresh_3 . (fresh_2 , fresh_3))) True) True))")
+            }
             _ => unreachable!(),
         }
     }
