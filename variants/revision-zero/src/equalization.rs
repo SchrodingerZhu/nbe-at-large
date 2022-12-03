@@ -1,6 +1,7 @@
 use crate::alpha_equality::AlphaEquality;
 use crate::term::{Name, RcPtr, Term};
 use crate::typecheck::TypeCheckContext;
+use crate::whnf::WeakHeadNF;
 
 trait Equalization: Sized {
     type Name;
@@ -29,8 +30,17 @@ impl Equalization for Term {
         if x.data.as_ref().alpha_equal(y.data.as_ref()) {
             return true;
         }
+        let x = Term::whnf(ctx, x.clone());
+        let y = Term::whnf(ctx, y.clone());
         match (x.data.as_ref(), y.data.as_ref()) {
-            _ => todo!(),
+            (Term::Type, Term::Type)
+            | (Term::TrustMe, Term::TrustMe)
+            | (Term::BottomType, Term::BottomType)
+            | (Term::UnitType, Term::UnitType)
+            | (Term::UnitIntro, Term::UnitIntro)
+            | (Term::BoolType, Term::BoolType) => true,
+
+            _ => false,
         }
     }
 }
