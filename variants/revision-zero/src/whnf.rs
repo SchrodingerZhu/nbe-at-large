@@ -110,13 +110,16 @@ mod test {
         module Test
 
         test : Bool -> (`Sigma Bool, Bool)
-        test x = case testValue of {
+        test x = case (id Bool testValue) of {
             True -> let u = x in (@Pair u x);
             False -> (@Pair x x);
         }
 
         testValue : Bool
         testValue = @True
+
+        id : (t : Type) -> t -> t
+        id _ x = x
         "#;
         let definitions = crate::term::test::get_definitions(source);
         let tree = {
