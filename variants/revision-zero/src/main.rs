@@ -1,8 +1,10 @@
 #![feature(box_patterns)]
+#![feature(associated_type_defaults)]
 mod alpha_equality;
 mod builtin;
 mod instantiation;
 mod term;
+mod whnf;
 
 #[macro_export]
 macro_rules! assert_unreachable {
