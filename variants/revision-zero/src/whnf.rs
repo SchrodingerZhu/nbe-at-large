@@ -4,15 +4,15 @@ use std::{collections::HashMap, rc::Rc};
 pub trait WeakHeadNF: Sized {
     type Wrapper<T>;
     type Name;
-    type Context = HashMap<Self::Name, Self::Wrapper<Self>>;
-    fn whnf(context: &Self::Context, tree: Self::Wrapper<Self>) -> Self::Wrapper<Self>;
+    type Context<'a>;
+    fn whnf<'a>(context: &Self::Context<'a>, tree: Self::Wrapper<Self>) -> Self::Wrapper<Self>;
 }
 
 impl WeakHeadNF for Term {
-    fn whnf(ctx: &Self::Context, tree: RcPtr<Self>) -> RcPtr<Self> {
+    fn whnf<'a>(ctx: &Self::Context<'a>, tree: RcPtr<Self>) -> RcPtr<Self> {
         match tree.data.as_ref() {
             Term::Type => tree,
-            Term::Variable(x) => match ctx.get(x) {
+            Term::Variable(x) => match ctx.lookup_def(x) {
                 Some(def) => Term::whnf(ctx, def.clone()),
                 None => tree.clone(),
             },
@@ -96,6 +96,7 @@ impl WeakHeadNF for Term {
 
     type Wrapper<T> = RcPtr<T>;
     type Name = Name;
+    type Context<'a> = crate::typecheck::TypeCheckContext<'a>;
 }
 
 #[cfg(test)]
@@ -120,7 +121,7 @@ mod test {
                     Term::instantiate(body.clone(), [(name.clone().unwrap(), target)].into_iter());
                 assert_eq!(
                     "(True , True)",
-                    format!("{}", Term::whnf(&HashMap::new(), result))
+                    format!("{}", Term::whnf(&Default::default(), result))
                 )
             }
             _ => unreachable!(),
