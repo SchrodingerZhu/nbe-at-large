@@ -67,9 +67,6 @@ pub enum Token {
     #[token("=")]
     Equal,
 
-    #[token("~=")]
-    SimEqual,
-
     #[regex("[a-z][0-9a-zA-Z']*")]
     SmallCase,
 

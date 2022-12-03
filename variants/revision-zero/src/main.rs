@@ -1,5 +1,7 @@
 #![feature(box_patterns)]
+mod alpha_equality;
 mod builtin;
+mod instantiation;
 mod term;
 
 #[macro_export]

@@ -109,7 +109,6 @@ pub enum ParseTree<'a> {
         var: Ptr<Self>,
         binding: Ptr<Self>,
         body: Ptr<Self>,
-        recursive: bool,
     },
     Lambda {
         params: Vec<Ptr<Self>>,
@@ -465,24 +464,21 @@ mod implementation {
 
     fn parse_let_in_expr<'a>(expr: impl Parse<'a>) -> impl Parse<'a> {
         let consume_let = just(Token::Let);
-        let equal = just(Token::Equal)
-            .to(false)
-            .or(just(Token::SimEqual).to(true));
+        let consume_equal = just(Token::Equal);
         let consume_in = just(Token::In);
         consume_let
             .ignore_then(parse_annotable_variable(expr.clone()))
-            .then(equal)
+            .then_ignore(consume_equal)
             .then(expr.clone())
             .then_ignore(consume_in)
             .then(expr)
-            .map_with_span(|(((var, recursive), binding), body), span| {
+            .map_with_span(|((var, binding), body), span| {
                 Ptr::new(
                     span.span,
                     Let {
                         var,
                         binding,
                         body,
-                        recursive,
                     },
                 )
             })
