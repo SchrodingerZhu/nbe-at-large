@@ -146,3 +146,19 @@ impl Default for TypeCheckContext<'static> {
         }
     }
 }
+
+impl<'src> TypeCheckContext<'src> {
+    pub fn new<'def, I>(source_name: &'src str, definitions: I) -> Self
+    where
+        I: Iterator<Item = &'def Definition>,
+    {
+        Self {
+            source_name,
+            global_defs: { HashMap::from_iter(definitions.map(|x| (x.name.clone(), x.clone()))) },
+            reports: Default::default(),
+            local_defs: Default::default(),
+            local_hints: Default::default(),
+            local_types: Default::default(),
+        }
+    }
+}

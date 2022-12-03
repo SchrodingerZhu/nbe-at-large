@@ -101,19 +101,33 @@ impl WeakHeadNF for Term {
 
 #[cfg(test)]
 mod test {
+    use crate::typecheck::TypeCheckContext;
+
     use super::*;
     #[test]
     fn test_whnf() {
         let source = r#"
         module Test
+
         test : Bool -> (`Sigma Bool, Bool)
-        test x = case x of {
+        test x = case testValue of {
             True -> let u = x in (@Pair u x);
             False -> (@Pair x x);
         }
+
+        testValue : Bool
+        testValue = @True
         "#;
         let definitions = crate::term::test::get_definitions(source);
-        let tree = definitions.first().unwrap().term.clone();
+        let tree = {
+            definitions
+                .iter()
+                .filter(|x| x.name.literal() == "test")
+                .next()
+                .unwrap()
+                .term
+                .clone()
+        };
         match tree.data.as_ref() {
             Term::Lam(name, body) => {
                 let target = RcPtr::new(0..0, Term::BoolIntro(true));
@@ -121,7 +135,10 @@ mod test {
                     Term::instantiate(body.clone(), [(name.clone().unwrap(), target)].into_iter());
                 assert_eq!(
                     "(True , True)",
-                    format!("{}", Term::whnf(&Default::default(), result))
+                    format!(
+                        "{}",
+                        Term::whnf(&TypeCheckContext::new("test", definitions.iter()), result)
+                    )
                 )
             }
             _ => unreachable!(),

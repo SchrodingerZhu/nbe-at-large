@@ -26,8 +26,11 @@ impl Hash for Name {
 }
 
 impl Name {
-    fn new<S: AsRef<str>>(name: S) -> Self {
+    pub fn new<S: AsRef<str>>(name: S) -> Self {
         Name(Rc::new(name.as_ref().to_string()))
+    }
+    pub fn literal(&self) -> &str {
+        self.0.as_str()
     }
 }
 
@@ -162,7 +165,7 @@ pub enum Term {
     SigmaElim(RcPtr<Self>, Option<Name>, Option<Name>, RcPtr<Self>),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Definition {
     pub name: Name,
     pub term: RcPtr<Term>,
