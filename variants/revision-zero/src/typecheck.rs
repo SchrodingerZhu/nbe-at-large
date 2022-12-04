@@ -509,10 +509,13 @@ impl BidirectionalTypeCheck for Term {
         }
     }
 
-    fn infer_type<'a>(term: Self::Wrapper<Self>, ctx: &Self::Context<'a>) -> Option<Self::Wrapper<Self>> {
+    fn infer_type<'a>(
+        term: Self::Wrapper<Self>,
+        ctx: &Self::Context<'a>,
+    ) -> Option<Self::Wrapper<Self>> {
         match term.data.as_ref() {
-            Term::Ann(_ ,_) => Self::check_term(term, None, ctx),
-            _ => Self::check_term(Self::whnf(ctx, term), None, ctx)
+            Term::Ann(_, _) => Self::check_term(term, None, ctx),
+            _ => Self::check_term(Self::whnf(ctx, term), None, ctx),
         }
     }
 }
@@ -633,5 +636,31 @@ mod test {
         assert!(!flag);
     }
 
-
+    #[test]
+    fn test_type_wrong_type_level() {
+        let source = r#"
+        module Test
+        correct : Bool -> Type
+        correct x = case x of {
+            True -> Unit;
+            False -> Bottom;
+        }
+        illegal : Bool -> Type
+        illegal x = case x of {
+            True -> @True;
+            False -> Bottom;
+        }
+        "#;
+        let definitions = crate::term::test::get_definitions(source);
+        let context = TypeCheckContext::new("test.txt", definitions.iter());
+        let mut flag = true;
+        for i in definitions {
+            flag = flag && Term::check_type(i.term, i.signature, &context);
+        }
+        for i in context.take_reports() {
+            i.print(("test.txt", ariadne::Source::from(source)))
+                .unwrap()
+        }
+        assert!(!flag);
+    }
 }
