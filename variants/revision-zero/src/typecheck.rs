@@ -515,13 +515,74 @@ mod test {
     use super::*;
 
     #[test]
-    fn test_type_check() {
+    fn test_type_check_0() {
         let source = r#"
         module Test
         test : Bool -> (`Sigma Bool, Bool)
         test x = case x of {
             True -> let u = x in (@Pair u x);
             False -> (@Pair x x);
+        }
+        "#;
+        let definitions = crate::term::test::get_definitions(source);
+        let context = TypeCheckContext::new("test.txt", definitions.iter());
+        let mut flag = true;
+        for i in definitions {
+            flag = flag && Term::check_type(i.term, i.signature, &context);
+        }
+        for i in context.take_reports() {
+            i.print(("test.txt", ariadne::Source::from(source)))
+                .unwrap()
+        }
+        assert!(flag);
+    }
+    #[test]
+    fn test_type_check_1() {
+        let source = r#"
+        module Test
+        explosion : (x : Type) -> Bottom -> x
+        explosion x b = case b of {}
+        "#;
+        let definitions = crate::term::test::get_definitions(source);
+        let context = TypeCheckContext::new("test.txt", definitions.iter());
+        let mut flag = true;
+        for i in definitions {
+            flag = flag && Term::check_type(i.term, i.signature, &context);
+        }
+        for i in context.take_reports() {
+            i.print(("test.txt", ariadne::Source::from(source)))
+                .unwrap()
+        }
+        assert!(flag);
+    }
+    #[test]
+    fn test_type_check_2() {
+        let source = r#"
+        module Test
+        prjLeft : (x : Type) -> (y : Type) -> (`Sigma x, y) -> x
+        prjLeft x y p = case p of {
+            Pair a b -> a;
+        }
+        "#;
+        let definitions = crate::term::test::get_definitions(source);
+        let context = TypeCheckContext::new("test.txt", definitions.iter());
+        let mut flag = true;
+        for i in definitions {
+            flag = flag && Term::check_type(i.term, i.signature, &context);
+        }
+        for i in context.take_reports() {
+            i.print(("test.txt", ariadne::Source::from(source)))
+                .unwrap()
+        }
+        assert!(flag);
+    }
+    #[test]
+    fn test_type_check_3() {
+        let source = r#"
+        module Test
+        prjLeft : (x : Type) -> (y : Type) -> (`Sigma x, y) -> (`Sigma x, x)
+        prjLeft x y p = case p of {
+            Pair a b -> (@Pair a a);
         }
         "#;
         let definitions = crate::term::test::get_definitions(source);
