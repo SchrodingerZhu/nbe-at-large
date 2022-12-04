@@ -3,7 +3,7 @@ use crate::term::{Name, RcPtr, Term};
 use crate::typecheck::TypeCheckContext;
 use crate::whnf::WeakHeadNF;
 use ariadne::{Color, Label};
-trait Equalization: Sized {
+pub trait Equalization: Sized {
     type Name;
     type Wrapper<T>;
     type Context<'a>;
