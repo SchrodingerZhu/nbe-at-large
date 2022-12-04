@@ -11,11 +11,16 @@ impl AlphaEquality for Term {
         struct UnificationContext(UnsafeCell<HashMap<Name, Name>>);
         struct Guard<'a>(&'a UnificationContext, Name);
         impl UnificationContext {
-            fn unify(&self, x: Name, y: Name) -> Guard {
-                unsafe { (*self.0.get()).insert(x.clone(), y) };
-                Guard(self, x)
+            fn unify(&self, x: &Name, y: &Name) -> Option<Guard> {
+                if x == y {
+                    None
+                } else {
+                unsafe { (*self.0.get()).insert(x.clone(), y.clone()) };
+                Some(Guard(self, x.clone()))
+                }
             }
             fn check(&self, x: &Name, y: &Name) -> bool {
+                x == y ||
                 unsafe { (*self.0.get()).get(x).map(|x| x == y).unwrap_or(false) }
             }
         }
@@ -37,7 +42,7 @@ impl AlphaEquality for Term {
                 (Term::Variable(x), Term::Variable(y)) => ctx.check(x, y),
                 (Term::Lam(ax, ay), Term::Lam(bx, by)) => {
                     let _guard = if let (Some(ax), Some(bx)) = (ax, bx) {
-                        Some(ctx.unify(ax.clone(), bx.clone()))
+                        Some(ctx.unify(ax, bx))
                     } else {
                         None
                     };
@@ -53,7 +58,7 @@ impl AlphaEquality for Term {
                 (Term::Ann(ax, _), Term::Ann(bx, _)) => alpha_equal_impl(ax, bx, ctx),
                 (Term::Let(ax, ay, az), Term::Let(bx, by, bz)) => {
                     let _guard = if let (Some(ax), Some(bx)) = (ax, bx) {
-                        Some(ctx.unify(ax.clone(), bx.clone()))
+                        Some(ctx.unify(ax, bx))
                     } else {
                         None
                     };
@@ -69,12 +74,12 @@ impl AlphaEquality for Term {
                 (Term::SigmaElim(a0, a1, a2, a3), Term::SigmaElim(b0, b1, b2, b3)) => {
                     alpha_equal_impl(a0, b0, ctx) && {
                         let _guard1 = if let (Some(ax), Some(bx)) = (a1, b1) {
-                            Some(ctx.unify(ax.clone(), bx.clone()))
+                            Some(ctx.unify(ax, bx))
                         } else {
                             None
                         };
                         let _guard2 = if let (Some(ax), Some(bx)) = (a2, b2) {
-                            Some(ctx.unify(ax.clone(), bx.clone()))
+                            Some(ctx.unify(ax, bx))
                         } else {
                             None
                         };
