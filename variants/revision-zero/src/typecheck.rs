@@ -1,11 +1,29 @@
 use crate::term::{Definition, Name, RcPtr, Term};
+use crate::whnf::WeakHeadNF;
 use ariadne::{Report, ReportBuilder};
-use std::cell::UnsafeCell;
+use std::cell::{Cell, UnsafeCell};
 use std::collections::HashMap;
 use std::ops::Range;
-trait BidirectionalTypeCheck: Sized {
-    type Wrapper<T>;
-    // TODO
+trait BidirectionalTypeCheck: Sized + WeakHeadNF {
+    fn check_term<'a>(
+        term: Self::Wrapper<Self>,
+        target: Option<Self::Wrapper<Self>>,
+        ctx: &Self::Context<'a>,
+    ) -> Option<Self::Wrapper<Self>>;
+    fn infer_type<'a>(
+        term: Self::Wrapper<Self>,
+        ctx: &Self::Context<'a>,
+    ) -> Option<Self::Wrapper<Self>> {
+        Self::check_term(term, None, ctx)
+    }
+    fn check_type<'a>(
+        term: Self::Wrapper<Self>,
+        target: Self::Wrapper<Self>,
+        ctx: &Self::Context<'a>,
+    ) -> bool {
+        let nf = Self::whnf(ctx, target);
+        Self::check_term(term, Some(nf), ctx).is_some()
+    }
 }
 
 type NamedSpan<'a> = (&'a str, Range<usize>);
@@ -18,6 +36,7 @@ pub struct TypeCheckContext<'a> {
     local_defs: UnsafeCell<HashMap<Name, RcPtr<Term>>>,
     local_hints: UnsafeCell<HashMap<Name, RcPtr<Term>>>,
     local_types: UnsafeCell<HashMap<Name, RcPtr<Term>>>,
+    fresh_counter: Cell<usize>,
 }
 
 enum ChangeLog {
@@ -146,6 +165,7 @@ impl Default for TypeCheckContext<'static> {
             local_defs: Default::default(),
             local_hints: Default::default(),
             local_types: Default::default(),
+            fresh_counter: Cell::new(0),
         }
     }
 }
@@ -162,6 +182,60 @@ impl<'src> TypeCheckContext<'src> {
             local_defs: Default::default(),
             local_hints: Default::default(),
             local_types: Default::default(),
+            fresh_counter: Cell::new(0),
+        }
+    }
+    pub(crate) fn fresh(&self) -> Name {
+        let counter = self.fresh_counter.get();
+        self.fresh_counter.replace(counter + 1);
+        Name::new(format!("hole_{}", counter))
+    }
+}
+
+fn ensure_type<'a>(term: RcPtr<Term>, ctx: &TypeCheckContext<'a>) -> bool {
+    let target = RcPtr::new(term.location.clone(), Term::Type);
+    Term::check_type(term, target, ctx)
+}
+
+impl BidirectionalTypeCheck for Term {
+    fn check_term<'a>(
+        term: Self::Wrapper<Self>,
+        target: Option<Self::Wrapper<Self>>,
+        ctx: &Self::Context<'a>,
+    ) -> Option<Self::Wrapper<Self>> {
+        match (term.data.as_ref(), target.as_ref().map(|x| x.data.as_ref())) {
+            (Term::Variable(x), None) => return ctx.lookup_type(x),
+            (Term::Type, None) => return Some(term),
+            (Term::Pi(a, bnd), None) => {
+                if ensure_type(a.clone(), ctx) {
+                    let fresh = ctx.fresh();
+                    let _guard = ctx.push_type(fresh.clone(), a.clone());
+                    let var = RcPtr::new(a.location.clone(), Term::Variable(fresh));
+                    let app = RcPtr::new(bnd.location.clone(), Term::App(bnd.clone(), var));
+                    if ensure_type(app, ctx) {
+                        Some(RcPtr::new(term.location.clone(), Term::Type))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            }
+            (Term::Lam(name, body), Some(Term::Pi(a, bnd))) => {
+                let fresh = ctx.fresh();
+                let _guard = ctx.push_type(fresh.clone(), a.clone());
+                let var = RcPtr::new(a.location.clone(), Term::Variable(fresh));
+                let app = RcPtr::new(bnd.location.clone(), Term::App(bnd.clone(), var));
+                let _guard2 = name
+                    .as_ref()
+                    .map(|name| ctx.push_type(name.clone(), a.clone()));
+                if Term::check_type(body.clone(), app, ctx) {
+                    target.clone()
+                } else {
+                    None
+                }
+            }
+            _ => todo!(),
         }
     }
 }

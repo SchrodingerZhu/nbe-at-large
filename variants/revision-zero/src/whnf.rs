@@ -2,7 +2,7 @@ use crate::instantiation::Instantiation;
 use crate::term::{Name, RcPtr, Term};
 use std::rc::Rc;
 pub trait WeakHeadNF: Sized {
-    type Wrapper<T>;
+    type Wrapper<T>: Clone;
     type Name;
     type Context<'a>;
     fn whnf<'a>(context: &Self::Context<'a>, tree: Self::Wrapper<Self>) -> Self::Wrapper<Self>;
