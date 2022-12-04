@@ -580,9 +580,12 @@ mod test {
     fn test_type_check_3() {
         let source = r#"
         module Test
+        id : (x : Type) -> x -> x
+        id _ x = x
+
         prjLeft : (x : Type) -> (y : Type) -> (`Sigma x, y) -> (`Sigma x, x)
         prjLeft x y p = case p of {
-            Pair a b -> (@Pair a a);
+            Pair a b -> (@Pair (id x a) (id x a));
         }
         "#;
         let definitions = crate::term::test::get_definitions(source);
