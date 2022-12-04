@@ -132,6 +132,9 @@ impl<'a> TypeCheckContext<'a> {
             offset,
         )))
     }
+    pub fn source_name(&self) -> &'a str {
+        self.source_name
+    }
 }
 
 impl Default for TypeCheckContext<'static> {
