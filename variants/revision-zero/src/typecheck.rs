@@ -197,6 +197,21 @@ fn ensure_type<'a>(term: RcPtr<Term>, ctx: &TypeCheckContext<'a>) -> bool {
     Term::check_type(term, target, ctx)
 }
 
+fn ensure_pi<'a>(
+    term: RcPtr<Term>,
+    ctx: &TypeCheckContext<'a>,
+) -> Option<(RcPtr<Term>, RcPtr<Term>)> {
+    let location = term.location.clone();
+    let term = Term::whnf(ctx, term);
+    match term.data.as_ref() {
+        Term::Pi(x, y) => Some((x.clone(), y.clone())),
+        _ => {
+            ctx.error(todo!(), |_| todo!());
+            None
+        }
+    }
+}
+
 impl BidirectionalTypeCheck for Term {
     fn check_term<'a>(
         term: Self::Wrapper<Self>,
@@ -222,13 +237,10 @@ impl BidirectionalTypeCheck for Term {
                 }
             }
             (Term::Lam(name, body), Some(Term::Pi(a, bnd))) => {
-                let fresh = ctx.fresh();
-                let _guard = ctx.push_type(fresh.clone(), a.clone());
-                let var = RcPtr::new(a.location.clone(), Term::Variable(fresh));
+                let name = name.clone().unwrap_or_else(|| ctx.fresh());
+                let _guard = ctx.push_type(name.clone(), a.clone());
+                let var = RcPtr::new(a.location.clone(), Term::Variable(name));
                 let app = RcPtr::new(bnd.location.clone(), Term::App(bnd.clone(), var));
-                let _guard2 = name
-                    .as_ref()
-                    .map(|name| ctx.push_type(name.clone(), a.clone()));
                 if Term::check_type(body.clone(), app, ctx) {
                     target.clone()
                 } else {
