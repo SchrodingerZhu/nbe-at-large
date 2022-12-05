@@ -45,7 +45,7 @@ impl Equalization for Term {
             // if a fresh variable exists in the normal form, it means that
             // they are currently not resolved within the scope, thus we directly
             // compare whether they are refering to the name object.
-            (Term::Variable(x), Term::Variable(y)) => x == y,
+            (Term::Variable(a), Term::Variable(b)) if a == b => true,
             (Term::Lam(_, x), Term::Lam(_, y))
             | (Term::IdIntro(x), Term::IdIntro(y))
             => Self::equalize(x, y, ctx, typecheck),

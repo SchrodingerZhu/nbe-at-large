@@ -8,3 +8,6 @@ edition = "2021"
 [dependencies]
 ariadne = "0.1.5"
 grammar = { path = "../../grammar"}
+
+[features]
+debug = []

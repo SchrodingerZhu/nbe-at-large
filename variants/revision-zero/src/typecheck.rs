@@ -565,10 +565,6 @@ impl BidirectionalTypeCheck for Term {
     ) -> Option<Self::Wrapper<Self>> {
         match term.data.as_ref() {
             Term::Ann(_, _) => Self::check_term(term, None, ctx),
-            Term::Variable(x) if x.literal() == "u" => {
-                let nf = Self::whnf(ctx, term);
-                Self::check_term(nf, None, ctx)
-            }
             _ => Self::check_term(Self::whnf(ctx, term), None, ctx),
         }
     }
