@@ -480,8 +480,9 @@ impl BidirectionalTypeCheck for Term {
                         match tx.data.as_ref() {
                             Term::IdType(t, a, b) => {
                                 let _guard0 = y.as_ref().map(|y| ctx.push_type(y.clone(), t.clone()));
-                                let _guard1 = y.as_ref().map(|y| ctx.push_def(y.clone(), a.clone()));
-                                let _guard2 = def(a.clone(), b.clone(), ctx);
+                                let var = RcPtr::new(z.location.clone(), Term::Variable(y.clone().unwrap_or_else(|| ctx.fresh())));
+                                let _guard1 = def(a.clone(), var.clone(), ctx);
+                                let _guard2 = def(b.clone(), var, ctx);
                                 let _guard3 = def(x.clone(), RcPtr::new(x.location.clone(), Term::IdIntro(a.clone())), ctx);
                                 if Self::check_type(z.clone(), unsafe { target.clone().unwrap_unchecked() }, ctx) {
                                     target
