@@ -19,7 +19,7 @@ trait BidirectionalTypeCheck: Sized + WeakHeadNF {
         term: Self::Wrapper<Self>,
         ctx: &Self::Context<'a>,
     ) -> Option<Self::Wrapper<Self>> {
-        Self::check_term(Self::whnf(ctx, term), None, ctx)
+        Self::check_term(Self::hole_filling(term), None, ctx)
     }
 
     fn check_type<'a>(
@@ -28,7 +28,7 @@ trait BidirectionalTypeCheck: Sized + WeakHeadNF {
         ctx: &Self::Context<'a>,
     ) -> bool {
         let nf = Self::whnf(ctx, target);
-        Self::check_term(Self::whnf(ctx, term), Some(nf), ctx).is_some()
+        Self::check_term(Self::hole_filling(term), Some(nf), ctx).is_some()
     }
 }
 
@@ -309,19 +309,15 @@ impl BidirectionalTypeCheck for Term {
                 None
             }
             (Term::App(x, y), None) => {
-                let nf = Term::whnf(ctx, x.clone());
-                match nf.data.as_ref() {
-                    _ => Self::infer_type(nf.clone(), ctx)
-                        .and_then(| type_x | ensure_pi(type_x, ctx))
-                        .and_then(| (a, bnd) | {
-                                if Self::check_type(y.clone(), a, ctx) {
-                                      let app = RcPtr::new(bnd.location.clone(), Term::App(bnd, y.clone()));
-                                          Some(Term::whnf(ctx, app))
-                                      } else {
-                                          None
-                                      }
-                        }),
-                }
+                Self::infer_type(x.clone(), ctx)
+                    .and_then(| type_x | ensure_pi(type_x, ctx))
+                    .and_then(| (a, bnd) | {
+                            if Self::check_type(y.clone(), a, ctx) {
+                                  let app = RcPtr::new(bnd.location.clone(), Term::App(bnd, y.clone()));
+                                      Some(Term::whnf(ctx, app))
+                                  } else {
+                                      None
+                                  }})                   
             }
             (Term::Ann(x, y), None) => {
                 if ensure_type(y.clone(), ctx) && Self::check_type(x.clone(), y.clone(), ctx) {
