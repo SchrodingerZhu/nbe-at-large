@@ -848,13 +848,15 @@ fn scan_module_definitions<'tree, 'src: 'tree>(
 }
 #[cfg(test)]
 pub(crate) mod test {
+    use ariadne::Report;
+
     use super::Definition;
 
     pub(crate) fn get_definitions(source: &str) -> Vec<Definition> {
         let parse = grammar::syntactic::parse(source);
         let parse_errs = parse.1;
         for i in parse_errs {
-            println!("{:?}", i);
+            eprintln!("{:?}", i)
         }
         let parse_tree = parse.0.unwrap();
         let definitions = Definition::new_from_module("source.txt", &parse_tree);

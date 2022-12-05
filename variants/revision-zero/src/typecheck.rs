@@ -28,7 +28,7 @@ trait BidirectionalTypeCheck: Sized + WeakHeadNF {
         ctx: &Self::Context<'a>,
     ) -> bool {
         let nf = Self::whnf(ctx, target);
-        Self::check_term(term, Some(nf), ctx).is_some()
+        Self::check_term(Self::whnf(ctx, term), Some(nf), ctx).is_some()
     }
 }
 
@@ -802,13 +802,37 @@ mod test {
         assert!(flag);
     }
     #[test]
-    fn test_type_transport() {
+    fn test_type_ap_and_path_induction() {
         let source = r#"
         module Test
-        transport : (a : Type) -> (b : Type) -> (x : a) -> (y : a) -> (Id a x y) -> (f : a -> b) -> (Id b (f x) (f y))
-        transport a b x y p f = case p of {
+        ap : (a : Type) -> (b : Type) -> (x : a) -> (y : a) -> (Id a x y) -> (f : a -> b) -> (Id b (f x) (f y))
+        ap a b x y p f = case p of {
             Refl u -> (@Refl (f u));
         }
+        pathInduction : (t : Type)
+                      → (a : (x : t) → (y : t) → (Id t x y) → Type)
+                      → ((x : t) → (a x x (@Refl x)))
+                      → (x : t) 
+                      → (y : t) 
+                      → (p : (Id t x y)) 
+                      → (a x y p)
+        pathInduction t a f x y p = case p of {
+            Refl u -> (f u);
+        }
+
+        transport : (t : Type)
+                  → (a : t → Type)
+                  → (x : t)
+                  → (y : t)
+                  → (Id t x y)
+                  → (a x)
+                  → (a y)
+        transport t a x y = 
+            let motive : (x : t) -> (y : t) -> (Id t x y) -> Type 
+                       = λ x y _ . (a x) -> (a y)                  in 
+            let base : (x : t) -> (a x) -> (a x) 
+                     = λ x . λ ax . ax                             in
+            (pathInduction t motive base x y)
         "#;
         let definitions = crate::term::test::get_definitions(source);
         let context = TypeCheckContext::new("test.txt", definitions.iter());

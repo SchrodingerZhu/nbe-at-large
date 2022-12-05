@@ -16,7 +16,18 @@ impl WeakHeadNF for Term {
                 Some(def) => Term::whnf(ctx, def.clone()),
                 None => tree.clone(),
             },
-            Term::Lam(_, _) => tree,
+
+            Term::Lam(Some(n), y) => {
+                let nf = Term::whnf(ctx, y.clone());
+                match nf.data.as_ref() {
+                    Term::Ann(x, y) => match y.data.as_ref() {
+                        Term::Variable(u) if u == n => x.clone(),
+                        _ => tree,
+                    },
+                    _ => tree,
+                }
+            }
+            Term::Lam(..) => tree,
             Term::App(x, y) => {
                 let nf = Term::whnf(ctx, x.clone());
                 match nf.data.as_ref() {

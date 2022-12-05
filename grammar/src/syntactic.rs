@@ -473,14 +473,7 @@ mod implementation {
             .then_ignore(consume_in)
             .then(expr)
             .map_with_span(|((var, binding), body), span| {
-                Ptr::new(
-                    span.span,
-                    Let {
-                        var,
-                        binding,
-                        body,
-                    },
-                )
+                Ptr::new(span.span, Let { var, binding, body })
             })
     }
 
