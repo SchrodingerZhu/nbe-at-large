@@ -787,6 +787,30 @@ mod test {
         assert!(flag);
     }
     #[test]
+    fn test_type_dependent_sigma() {
+        let source = r#"
+        module Test
+        boolTypeLevel : Bool -> Type
+        boolTypeLevel x = case x of {
+            True -> Unit;
+            False -> Bottom;
+        }
+        test : `Sigma (x : Bool) , (boolTypeLevel x)
+        test = (@Pair @True @Unit)
+        "#;
+        let definitions = crate::term::test::get_definitions(source);
+        let context = TypeCheckContext::new("test.txt", definitions.iter());
+        let mut flag = true;
+        for i in definitions {
+            flag = flag && Term::check_type(i.term, i.signature, &context);
+        }
+        for i in context.take_reports() {
+            i.print(("test.txt", ariadne::Source::from(source)))
+                .unwrap()
+        }
+        assert!(flag);
+    }
+    #[test]
     fn test_type_ap_and_path_induction() {
         let source = r#"
         module Test
