@@ -409,7 +409,7 @@ impl BidirectionalTypeCheck for Term {
                 .and_then(|type_y| {
                     let _g1 = x.as_ref().map(|x| ctx.push_type(x.clone(), type_y));
                     let _g2 = x.as_ref().map(|x| ctx.push_def(x.clone(), y.clone()));
-                    Self::check_term(z.clone(), target.clone(), ctx)
+                    Self::check_term(Term::hole_solving(z.clone()), target.clone(), ctx)
                 })
                 .map(|result| match (required, x) {
                     (Some(_), _) | (_, None) => result,
@@ -837,7 +837,9 @@ mod test {
                   → (a x)
                   → (a y)
         transport t a x y = 
-            (pathInduction t λ x y _ . (a x) -> (a y) λ x . λ ax . ax x y)
+            let motive : (x : t) -> (y : t) -> (Id t x y) -> Type = λ x y _ . (a x) -> (a y) in
+            let base : (x : t) -> (a x) -> (a x) = λ x . λ ax . ax in
+            (pathInduction t motive λ x . λ ax . ax x y)
         "#;
         let definitions = crate::term::test::get_definitions(source);
         let context = TypeCheckContext::new("test.txt", definitions.iter());

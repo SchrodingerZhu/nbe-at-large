@@ -47,7 +47,7 @@ impl WeakHeadNF for Term {
                 }
             }
             Term::Pi(_, _) => tree,
-            Term::Ann(_, _) => tree,
+            Term::Ann(x, _) => x.clone(),
             Term::Let(x, y, z) => match x {
                 Some(name) => {
                     let body =
