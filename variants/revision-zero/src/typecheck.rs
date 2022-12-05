@@ -764,8 +764,8 @@ mod test {
         module Test
         neg : Bool -> Bool
         neg x = case x of {
-            True -> @True;
-            False -> @False;
+            True -> @False;
+            False -> @True;
         }
 
         lemma : (x : Bool) -> (Id Bool (neg (neg x)) x)
@@ -797,6 +797,62 @@ mod test {
         }
         test : `Sigma (x : Bool) , (boolTypeLevel x)
         test = (@Pair @True @Unit)
+        "#;
+        let definitions = crate::term::test::get_definitions(source);
+        let context = TypeCheckContext::new("test.txt", definitions.iter());
+        let mut flag = true;
+        for i in definitions {
+            flag = flag && Term::check_type(i.term, i.signature, &context);
+        }
+        for i in context.take_reports() {
+            i.print(("test.txt", ariadne::Source::from(source)))
+                .unwrap()
+        }
+        assert!(flag);
+    }
+    #[test]
+    fn test_type_bool_proof() {
+        let source = r#"
+        module Test
+        not : Bool -> Bool
+        not x = case x of {
+            True -> @False;
+            False -> @True;
+        }
+        neg : (x : Type) -> Type
+        neg x = x -> Bottom
+
+        boolTypeLevel : Bool -> Type
+        boolTypeLevel x = case x of {
+            True -> Unit;
+            False -> Bottom;
+        }
+
+        ap : (a : Type) -> (b : Type) -> (x : a) -> (y : a) -> (Id a x y) -> (f : a -> b) -> (Id b (f x) (f y))
+        ap a b x y p f = case p of {
+            Refl u -> (@Refl (f u));
+        }
+
+        idFunc : (x : Type) -> (y : Type) -> (Id Type x y) -> x -> y
+        idFunc x y p = case p of {
+            Refl u -> \ a . a;
+        }
+
+        pathInv : (t : Type) -> (x : t) -> (y : t) -> (Id t x y) -> (Id t y x)
+        pathInv t x y p = case p of {
+            Refl u -> p;
+        }
+
+        lemma : (x : Bool) -> (neg (Id Bool x (not x)))
+        lemma x p = case x of {
+            True -> 
+                let absurd : (Id Type Unit Bottom) = (ap Bool Type @True @False p boolTypeLevel) in
+                (idFunc Unit Bottom absurd @Unit);
+            False -> 
+                let absurd : (Id Type Bottom Unit) = (ap Bool Type @False @True p boolTypeLevel) in
+                let inv : (Id Type Unit Bottom) = (pathInv Type Bottom Unit absurd) in 
+                (idFunc Unit Bottom inv @Unit);
+        }
         "#;
         let definitions = crate::term::test::get_definitions(source);
         let context = TypeCheckContext::new("test.txt", definitions.iter());
