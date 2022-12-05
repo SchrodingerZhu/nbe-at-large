@@ -558,16 +558,6 @@ impl BidirectionalTypeCheck for Term {
         }
         result
     }
-
-    fn infer_type<'a>(
-        term: Self::Wrapper<Self>,
-        ctx: &Self::Context<'a>,
-    ) -> Option<Self::Wrapper<Self>> {
-        match term.data.as_ref() {
-            Term::Ann(_, _) => Self::check_term(term, None, ctx),
-            _ => Self::check_term(Self::whnf(ctx, term), None, ctx),
-        }
-    }
 }
 
 #[cfg(test)]
