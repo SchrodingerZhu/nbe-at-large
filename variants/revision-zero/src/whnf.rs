@@ -20,7 +20,7 @@ impl WeakHeadNF for Term {
             Term::Lam(Some(n), y) => {
                 let nf = Term::whnf(ctx, y.clone());
                 match nf.data.as_ref() {
-                    Term::Ann(x, y) => match y.data.as_ref() {
+                    Term::App(x, y) => match y.data.as_ref() {
                         Term::Variable(u) if u == n => x.clone(),
                         _ => tree,
                     },
@@ -46,7 +46,7 @@ impl WeakHeadNF for Term {
                 }
             }
             Term::Pi(_, _) => tree,
-            Term::Ann(x, _) => x.clone(),
+            Term::Ann(_, _) => tree,
             Term::Let(x, y, z) => match x {
                 Some(name) => {
                     let body =
