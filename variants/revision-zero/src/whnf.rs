@@ -6,7 +6,7 @@ pub trait WeakHeadNF: Sized {
     type Name;
     type Context<'a>;
     fn whnf<'a>(context: &Self::Context<'a>, tree: Self::Wrapper<Self>) -> Self::Wrapper<Self>;
-    fn hole_filling<'a>(tree: Self::Wrapper<Self>) -> Self::Wrapper<Self>;
+    fn hole_solving<'a>(tree: Self::Wrapper<Self>) -> Self::Wrapper<Self>;
 }
 
 impl WeakHeadNF for Term {
@@ -128,20 +128,22 @@ impl WeakHeadNF for Term {
     type Name = Name;
     type Context<'a> = crate::typecheck::TypeCheckContext<'a>;
 
-    fn hole_filling<'a>(tree: Self::Wrapper<Self>) -> Self::Wrapper<Self> {
+    fn hole_solving<'a>(tree: Self::Wrapper<Self>) -> Self::Wrapper<Self> {
         match tree.data.as_ref() {
             Term::App(x, y) => {
-                let nx = Self::hole_filling(x.clone());
+                let nx = Self::hole_solving(x.clone());
                 match nx.data.as_ref() {
-                    Term::Lam(Some(n), body) if n.literal().starts_with("fresh_") || n.literal().starts_with("hole_") => 
-                    Self::hole_filling(
-                        Term::instantiate(body.clone(), [(n.clone(), y.clone())].into_iter())
-                    ),
+                    Term::Lam(Some(n), body) if n.literal().starts_with("fresh_") => {
+                        Self::hole_solving(Term::instantiate(
+                            body.clone(),
+                            [(n.clone(), y.clone())].into_iter(),
+                        ))
+                    }
                     _ if Rc::ptr_eq(&nx.data, &x.data) => tree,
-                    _ => RcPtr::new(tree.location, Term::App(nx, y.clone()))
+                    _ => RcPtr::new(tree.location, Term::App(nx, y.clone())),
                 }
-            },
-            _ => tree
+            }
+            _ => tree,
         }
     }
 }

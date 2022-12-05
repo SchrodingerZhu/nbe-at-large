@@ -19,7 +19,7 @@ trait BidirectionalTypeCheck: Sized + WeakHeadNF {
         term: Self::Wrapper<Self>,
         ctx: &Self::Context<'a>,
     ) -> Option<Self::Wrapper<Self>> {
-        Self::check_term(Self::hole_filling(term), None, ctx)
+        Self::check_term(Self::hole_solving(term), None, ctx)
     }
 
     fn check_type<'a>(
@@ -28,7 +28,7 @@ trait BidirectionalTypeCheck: Sized + WeakHeadNF {
         ctx: &Self::Context<'a>,
     ) -> bool {
         let nf = Self::whnf(ctx, target);
-        Self::check_term(Self::hole_filling(term), Some(nf), ctx).is_some()
+        Self::check_term(Self::hole_solving(term), Some(nf), ctx).is_some()
     }
 }
 
@@ -309,15 +309,27 @@ impl BidirectionalTypeCheck for Term {
                 None
             }
             (Term::App(x, y), None) => {
-                Self::infer_type(x.clone(), ctx)
-                    .and_then(| type_x | ensure_pi(type_x, ctx))
-                    .and_then(| (a, bnd) | {
-                            if Self::check_type(y.clone(), a, ctx) {
-                                  let app = RcPtr::new(bnd.location.clone(), Term::App(bnd, y.clone()));
-                                      Some(Term::whnf(ctx, app))
-                                  } else {
-                                      None
-                                  }})                   
+                match (x.data.as_ref(), y.data.as_ref()) {
+                    (Term::Lam(name, body), Term::Variable(hole))
+                        if hole.literal().starts_with("hole_") => {
+                            match name {
+                                Some(name) => {
+                                    let _guard = ctx.push_def(name.clone(), y.clone());
+                                    Self::infer_type(body.clone(), ctx)
+                                }
+                                None => Self::infer_type(body.clone(), ctx)
+                            }
+                    }
+                    _ =>Self::infer_type(x.clone(), ctx)
+                        .and_then(| type_x | ensure_pi(type_x, ctx))
+                        .and_then(| (a, bnd) | {
+                                if Self::check_type(y.clone(), a, ctx) {
+                                    let app = RcPtr::new(bnd.location.clone(), Term::App(bnd, y.clone()));
+                                        Some(Term::whnf(ctx, app))
+                                    } else {
+                                        None
+                                    }})
+                }
             }
             (Term::Ann(x, y), None) => {
                 if ensure_type(y.clone(), ctx) && Self::check_type(x.clone(), y.clone(), ctx) {
@@ -814,11 +826,7 @@ mod test {
                   → (a x)
                   → (a y)
         transport t a x y = 
-            let motive : (x : t) -> (y : t) -> (Id t x y) -> Type 
-                       = λ x y _ . (a x) -> (a y)                  in 
-            let base : (x : t) -> (a x) -> (a x) 
-                     = λ x . λ ax . ax                             in
-            (pathInduction t motive base x y)
+            (pathInduction t λ x y _ . (a x) -> (a y) λ x . λ ax . ax x y)
         "#;
         let definitions = crate::term::test::get_definitions(source);
         let context = TypeCheckContext::new("test.txt", definitions.iter());

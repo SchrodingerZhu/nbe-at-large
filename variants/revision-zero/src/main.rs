@@ -1,5 +1,7 @@
 #![feature(box_patterns)]
 #![feature(associated_type_defaults)]
+#![feature(if_let_guard)]
+#![feature(let_chains)]
 mod alpha_equality;
 mod builtin;
 mod equalization;
