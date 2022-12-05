@@ -15,6 +15,7 @@ pub(crate) struct BuiltinUnit;
 pub(crate) struct BuiltinPair;
 pub(crate) struct BuiltinBool;
 pub(crate) struct BuiltinBottom;
+pub(crate) struct BuiltinId;
 
 impl BuiltinType for BuiltinUnit {
     type ElimRules = RcPtr<Term>;
@@ -121,6 +122,55 @@ impl BuiltinType for BuiltinBottom {
             Ok(Some(()))
         } else {
             Ok(None)
+        }
+    }
+}
+
+impl BuiltinType for BuiltinId {
+    type ElimRules = (Option<Name>, RcPtr<Term>);
+
+    fn new_from_pattern_rules<'src>(
+        ctx: &SyntaxContext<'src>,
+        rules: &[Ptr<ParseTree<'src>>],
+    ) -> Result<Option<Self::ElimRules>, ()> {
+        if rules.len() != 1 {
+            return Ok(None);
+        }
+        match rules.first() {
+            Some(Ptr {
+                location,
+                data:
+                    box ParseTree::PatternRule {
+                        constructor,
+                        variables,
+                        body,
+                    },
+            }) => match constructor.get_literal() {
+                "Refl" if variables.len() == 1 => {
+                    let (var, _guard) = Term::new_from_parameter(ctx, &variables[0])
+                        .map(|name| ctx.push_variable(name))
+                        .map(|(x, y)| (Some(x), Some(y)))
+                        .unwrap_or((None, None));
+                    match Term::new_from_expr(ctx, body) {
+                        None => Err(()),
+                        Some(body) => Ok(Some((var, body))),
+                    }
+                }
+                "Refl" => Err(ctx.error(location.start, |builder| {
+                    builder
+                        .with_message("Illegal elimination for Sigma type")
+                        .with_label(
+                            Label::new((ctx.source_name, location.clone()))
+                                .with_color(Color::Red)
+                                .with_message(
+                                    "the number parameter is not unmatched for Refl constructor",
+                                ),
+                        )
+                        .finish()
+                })),
+                _ => Ok(None),
+            },
+            _ => assert_unreachable!(),
         }
     }
 }

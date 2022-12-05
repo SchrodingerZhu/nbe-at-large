@@ -143,6 +143,36 @@ impl Instantiation for Term {
                         )
                     }
                 }
+                Term::IdType(a, b, c) => {
+                    let new_a = instantiate_with_map(a.clone(), map);
+                    let new_b = instantiate_with_map(b.clone(), map);
+                    let new_c = instantiate_with_map(c.clone(), map);
+                    if Rc::ptr_eq(&a.data, &new_a.data)
+                        && Rc::ptr_eq(&b.data, &new_b.data)
+                        && Rc::ptr_eq(&c.data, &new_c.data)
+                    {
+                        tree
+                    } else {
+                        RcPtr::new(tree.location, Term::IdType(new_a, new_b, new_c))
+                    }
+                }
+                Term::IdIntro(a) => {
+                    let new_a = instantiate_with_map(a.clone(), map);
+                    if Rc::ptr_eq(&a.data, &new_a.data) {
+                        tree
+                    } else {
+                        RcPtr::new(tree.location, Term::IdIntro(new_a))
+                    }
+                }
+                Term::IdElim(a, x, b) => {
+                    let new_a = instantiate_with_map(a.clone(), map);
+                    let new_b = instantiate_with_map(b.clone(), map);
+                    if Rc::ptr_eq(&a.data, &new_a.data) && Rc::ptr_eq(&b.data, &new_b.data) {
+                        tree
+                    } else {
+                        RcPtr::new(tree.location, Term::IdElim(new_a, x.clone(), new_b))
+                    }
+                }
             }
         }
         instantiate_with_map(body, &map)

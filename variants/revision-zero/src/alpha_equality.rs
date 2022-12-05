@@ -63,9 +63,11 @@ impl AlphaEquality for Term {
                     };
                     alpha_equal_impl(ay, by, ctx) && alpha_equal_impl(az, bz, ctx)
                 }
-                (Term::BottomElim(ax), Term::BottomElim(bx)) => alpha_equal_impl(ax, bx, ctx),
+                (Term::BottomElim(ax), Term::BottomElim(bx))
+                | (Term::IdIntro(ax), Term::IdIntro(bx)) => alpha_equal_impl(ax, bx, ctx),
                 (Term::BoolIntro(ax), Term::BoolIntro(bx)) => ax == bx,
-                (Term::BoolElim(ax, ay, az), Term::BoolElim(bx, by, bz)) => {
+                (Term::BoolElim(ax, ay, az), Term::BoolElim(bx, by, bz))
+                | (Term::IdType(ax, ay, az), Term::IdType(bx, by, bz)) => {
                     alpha_equal_impl(ax, bx, ctx)
                         && alpha_equal_impl(ay, by, ctx)
                         && alpha_equal_impl(az, bz, ctx)
@@ -83,6 +85,16 @@ impl AlphaEquality for Term {
                             None
                         };
                         alpha_equal_impl(a3, b3, ctx)
+                    }
+                }
+                (Term::IdElim(a0, a1, a2), Term::IdElim(b0, b1, b2)) => {
+                    alpha_equal_impl(a0, b0, ctx) && {
+                        let _guard = if let (Some(ax), Some(bx)) = (a1, b1) {
+                            ctx.unify(ax, bx)
+                        } else {
+                            None
+                        };
+                        alpha_equal_impl(a2, b2, ctx)
                     }
                 }
                 _ => false,

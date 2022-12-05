@@ -1,5 +1,7 @@
 use crate::assert_unreachable;
-use crate::builtin::{BuiltinBool, BuiltinBottom, BuiltinPair, BuiltinType, BuiltinUnit};
+use crate::builtin::{
+    BuiltinBool, BuiltinBottom, BuiltinId, BuiltinPair, BuiltinType, BuiltinUnit,
+};
 use ariadne::{Color, Label, Report, ReportBuilder};
 use grammar::syntactic::{ParseTree, Ptr};
 use std::cell::{Cell, UnsafeCell};
@@ -137,6 +139,21 @@ impl std::fmt::Display for Term {
                 let c = c.as_ref().map(|x| x.0.as_str()).unwrap_or("_");
                 write!(f, "(let ({}, {}) = {} in {})", b, c, a, d)
             }
+            Term::IdType(a, b, c) => {
+                write!(f, "({} ≡ {} : {})", b, c, a)
+            }
+            Term::IdIntro(x) => {
+                write!(f, "(Refl {})", x)
+            }
+            Term::IdElim(x, y, z) => {
+                write!(
+                    f,
+                    "(id-elim {} with Refl {} -> {})",
+                    x,
+                    y.as_ref().map(|x| x.literal()).unwrap_or("_"),
+                    z
+                )
+            }
         }
     }
 }
@@ -163,6 +180,9 @@ pub enum Term {
     SigmaType(RcPtr<Self>, RcPtr<Self>),
     SigmaIntro(RcPtr<Self>, RcPtr<Self>),
     SigmaElim(RcPtr<Self>, Option<Name>, Option<Name>, RcPtr<Self>),
+    IdType(RcPtr<Self>, RcPtr<Self>, RcPtr<Self>),
+    IdIntro(RcPtr<Self>),
+    IdElim(RcPtr<Self>, Option<Name>, RcPtr<Self>),
 }
 
 #[derive(Debug, Clone)]
@@ -344,6 +364,13 @@ impl Term {
                 }
                 "True" => Some(RcPtr::new(location, Term::BoolIntro(true))),
                 "False" => Some(RcPtr::new(location, Term::BoolIntro(false))),
+                "Refl" => {
+                    let a = ctx.fresh();
+                    let var_a = RcPtr::new(location.clone(), Term::Variable(a.clone()));
+                    let refl = RcPtr::new(location.clone(), Term::IdIntro(var_a));
+                    let lambda = RcPtr::new(location.clone(), Term::Lam(Some(a), refl));
+                    Some(lambda)
+                }
                 lit => {
                     ctx.error(location.start, |builder| {
                         builder
@@ -457,6 +484,13 @@ impl Term {
                     }
                     Err(_) => return None,
                 }
+                match BuiltinId::new_from_pattern_rules(ctx, rules.as_slice()) {
+                    Ok(None) => (),
+                    Ok(Some((var, body))) => {
+                        return Some(RcPtr::new(location, Term::IdElim(expr, var, body)));
+                    }
+                    Err(_) => return None,
+                }
                 ctx.error(location.start, |builder| {
                     builder
                         .with_message("unsupported feature")
@@ -550,6 +584,19 @@ impl Term {
                     let var_b = RcPtr::new(location.clone(), Term::Variable(b.clone()));
                     let sigma = RcPtr::new(location.clone(), Term::SigmaType(var_a, var_b));
                     let lambda = RcPtr::new(location.clone(), Term::Lam(Some(b), sigma));
+                    let lambda = RcPtr::new(location, Term::Lam(Some(a), lambda));
+                    Some(lambda)
+                }
+                "Id" => {
+                    let a = ctx.fresh();
+                    let b = ctx.fresh();
+                    let c = ctx.fresh();
+                    let var_a = RcPtr::new(location.clone(), Term::Variable(a.clone()));
+                    let var_b = RcPtr::new(location.clone(), Term::Variable(b.clone()));
+                    let var_c = RcPtr::new(location.clone(), Term::Variable(c.clone()));
+                    let id = RcPtr::new(location.clone(), Term::IdType(var_a, var_b, var_c));
+                    let lambda = RcPtr::new(location.clone(), Term::Lam(Some(c), id));
+                    let lambda = RcPtr::new(location.clone(), Term::Lam(Some(b), lambda));
                     let lambda = RcPtr::new(location, Term::Lam(Some(a), lambda));
                     Some(lambda)
                 }
@@ -913,6 +960,24 @@ pub(crate) mod test {
     test check x = case x of {
         True -> `Pi (i : Bool), let u : Type = (check Unit i) in u;
         False -> `Sigma (i : Bool), (check Bool i);
+    }
+    "#
+    );
+    test_source_parsing!(
+        test_refl_intro,
+        r#"
+    module Test
+    test : (x : Type) -> (i : x) -> (Id x i i)
+    test x i = (@Refl i)
+    "#
+    );
+    test_source_parsing!(
+        test_refl_elim,
+        r#"
+    module Test
+    test : (x : Type) -> (i : x) -> (Id x i i) -> Unit
+    test x p = case p of {
+        Refl _ -> @Unit;
     }
     "#
     );

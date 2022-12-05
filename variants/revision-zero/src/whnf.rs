@@ -70,6 +70,24 @@ impl WeakHeadNF for Term {
             }
             Term::SigmaType(_, _) => tree,
             Term::SigmaIntro(_, _) => tree,
+            Term::IdType(_, _, _) => tree,
+            Term::IdIntro(_) => tree,
+            Term::IdElim(x, y, z) => {
+                let nf = Term::whnf(ctx, x.clone());
+                match nf.data.as_ref() {
+                    Term::IdIntro(v) => {
+                        let var = if let Some(y) = y {
+                            vec![(y.clone(), v.clone())]
+                        } else {
+                            vec![]
+                        };
+                        let z = Term::instantiate(z.clone(), var.into_iter());
+                        Term::whnf(ctx, z)
+                    }
+                    _ if Rc::ptr_eq(&nf.data, &x.data) => tree,
+                    _ => RcPtr::new(tree.location, Term::IdElim(nf, y.clone(), z.clone())),
+                }
+            }
             Term::SigmaElim(x, a, b, y) => {
                 let nf = Term::whnf(ctx, x.clone());
                 match nf.data.as_ref() {

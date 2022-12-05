@@ -40,14 +40,12 @@ pub struct TypeCheckContext<'a> {
 
     reports: UnsafeCell<Vec<Report<NamedSpan<'a>>>>,
     local_defs: UnsafeCell<HashMap<Name, RcPtr<Term>>>,
-    local_hints: UnsafeCell<HashMap<Name, RcPtr<Term>>>,
     local_types: UnsafeCell<HashMap<Name, RcPtr<Term>>>,
     fresh_counter: Cell<usize>,
 }
 
 enum ChangeLog {
     LocalDef(Name, Option<RcPtr<Term>>),
-    LocalHint(Name, Option<RcPtr<Term>>),
     LocalType(Name, Option<RcPtr<Term>>),
 }
 pub struct Guard<'src, 'ctx> {
@@ -60,9 +58,6 @@ impl<'src, 'ctx> Drop for Guard<'src, 'ctx> {
         let (name, delta, map) = match &mut self.changelog {
             ChangeLog::LocalDef(name, delta) => (name.clone(), delta, unsafe {
                 &mut *self.ctx.local_defs.get()
-            }),
-            ChangeLog::LocalHint(name, delta) => (name.clone(), delta, unsafe {
-                &mut *self.ctx.local_hints.get()
             }),
             ChangeLog::LocalType(name, delta) => (name.clone(), delta, unsafe {
                 &mut *self.ctx.local_types.get()
@@ -80,9 +75,6 @@ impl<'src, 'ctx> Drop for Guard<'src, 'ctx> {
 }
 
 impl<'a> TypeCheckContext<'a> {
-    pub fn lookup_hint(&self, name: &Name) -> Option<RcPtr<Term>> {
-        unsafe { (*self.local_hints.get()).get(name).cloned() }
-    }
     pub fn lookup_def(&self, name: &Name) -> Option<RcPtr<Term>> {
         unsafe {
             (*self.local_defs.get())
@@ -97,15 +89,6 @@ impl<'a> TypeCheckContext<'a> {
                 .get(name)
                 .cloned()
                 .or_else(|| self.global_defs.get(name).map(|x| x.signature.clone()))
-        }
-    }
-
-    pub fn push_hint<'b>(&'b self, name: Name, value: RcPtr<Term>) -> Guard<'a, 'b> {
-        Guard {
-            ctx: self,
-            changelog: ChangeLog::LocalHint(name.clone(), unsafe {
-                (*self.local_hints.get()).insert(name, value)
-            }),
         }
     }
 
@@ -169,7 +152,6 @@ impl Default for TypeCheckContext<'static> {
             global_defs: Default::default(),
             reports: Default::default(),
             local_defs: Default::default(),
-            local_hints: Default::default(),
             local_types: Default::default(),
             fresh_counter: Cell::new(0),
         }
@@ -186,7 +168,6 @@ impl<'src> TypeCheckContext<'src> {
             global_defs: { HashMap::from_iter(definitions.map(|x| (x.name.clone(), x.clone()))) },
             reports: Default::default(),
             local_defs: Default::default(),
-            local_hints: Default::default(),
             local_types: Default::default(),
             fresh_counter: Cell::new(0),
         }
@@ -241,13 +222,9 @@ impl BidirectionalTypeCheck for Term {
         target: Option<Self::Wrapper<Self>>,
         ctx: &Self::Context<'a>,
     ) -> Option<Self::Wrapper<Self>> {
-        // if let Some(target) = target.as_ref() {
-        //     println!("type checking {} against {}", term, target);
-        // } else {
-        //     println!("infer {}", term);
-        // }
-        // println!("context: {:?}\n", unsafe { (*ctx.local_types.get()).iter() }.collect::<Vec<_>>());
-        match (
+        let debug_target = target.clone();
+        let debug_term = term.clone();
+        let result = match (
             term.data.as_ref(),
             target
                 .as_ref()
@@ -482,6 +459,56 @@ impl BidirectionalTypeCheck for Term {
                         }
                     })
             }
+            (Term::IdType(_, _, _), None) => Some(RcPtr::new(term.location.clone(), Term::Type)),
+            (Term::IdIntro(x), None) => {
+                Self::infer_type(x.clone(), ctx)
+                    .map(|type_x| {
+                        RcPtr::new(term.location.clone(), Term::IdType(type_x, x.clone(), x.clone()))
+                    })
+            }
+            (Term::IdIntro(a), Some((_, Term::IdType(t, x, y)))) => {
+                if Self::check_type(a.clone(), t.clone(), ctx) {
+                    if Term::equalize(x , y, ctx, false) {
+                        target
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            }
+            (Term::IdElim(x, y, z), Some(_)) => {
+                Self::infer_type(x.clone(), ctx)
+                    .and_then(|x| {
+                        let x = Self::whnf(ctx, x);
+                        match x.data.as_ref() {
+                            Term::IdType(t, a, b) => {
+                                let _guard0 = y.as_ref().map(|y| ctx.push_type(y.clone(), t.clone()));
+                                let _guard1 = y.as_ref().map(|y| ctx.push_def(y.clone(), x.clone()));
+                                let _guard2 = def(a.clone(), b.clone(), ctx);
+                                let _guard3 = def(x.clone(), RcPtr::new(x.location.clone(), Term::IdIntro(a.clone())), ctx);
+                                if Self::check_type(z.clone(), unsafe { target.clone().unwrap_unchecked() }, ctx) {
+                                    target
+                                } else {
+                                    None
+                                }
+                            }
+                            _ => {
+                                ctx.error(term.location.start, |builder|
+                                    builder
+                                        .with_message("Type Error")
+                                        .with_label(Label::new((ctx.source_name, term.location.clone()))
+                                            .with_color(Color::Red)
+                                            .with_message("trying to apply elimination rule of the identity type"))
+                                        .with_label(Label::new((ctx.source_name, x.location.clone()))
+                                            .with_color(Color::Red)
+                                            .with_message(format!("... however, the matched expression is not of identity type, the WHNF is {}", x)))
+                                        .finish());
+                                None
+                            }
+                        }
+                    })
+            }
 
             (_, Some(_)) => {
                 Self::infer_type(term, ctx)
@@ -506,7 +533,21 @@ impl BidirectionalTypeCheck for Term {
                 );
                 None
             },
+        };
+        if let Some(target) = debug_target.as_ref() {
+            eprintln!("type checking {} against {}", debug_term, target);
+        } else {
+            eprintln!("infer {}", debug_term);
         }
+        eprintln!(
+            "context: {:?}",
+            unsafe { (*ctx.local_types.get()).iter() }.collect::<Vec<_>>()
+        );
+        match result.as_ref() {
+            Some(x) => eprintln!("result: {}\n", x),
+            None => eprintln!("result: failed\n"),
+        }
+        result
     }
 
     fn infer_type<'a>(
@@ -515,6 +556,10 @@ impl BidirectionalTypeCheck for Term {
     ) -> Option<Self::Wrapper<Self>> {
         match term.data.as_ref() {
             Term::Ann(_, _) => Self::check_term(term, None, ctx),
+            Term::Variable(x) if x.literal() == "u" => {
+                let nf = Self::whnf(ctx, term);
+                Self::check_term(nf, None, ctx)
+            },
             _ => Self::check_term(Self::whnf(ctx, term), None, ctx),
         }
     }
@@ -662,5 +707,116 @@ mod test {
                 .unwrap()
         }
         assert!(!flag);
+    }
+
+    #[test]
+    fn test_type_refl_intro() {
+        let source = r#"
+        module Test
+        refl : (x : Type) -> (i : x) -> (Id x i i)
+        refl x i = (@Refl i)
+        "#;
+        let definitions = crate::term::test::get_definitions(source);
+        let context = TypeCheckContext::new("test.txt", definitions.iter());
+        let mut flag = true;
+        for i in definitions {
+            flag = flag && Term::check_type(i.term, i.signature, &context);
+        }
+        for i in context.take_reports() {
+            i.print(("test.txt", ariadne::Source::from(source)))
+                .unwrap()
+        }
+        assert!(flag);
+    }
+    #[test]
+    fn test_type_wrong_refl() {
+        let source = r#"
+        module Test
+        absurd : (i : Bool) -> (Id Bool @False i)
+        absurd i = (@Refl i)
+        "#;
+        let definitions = crate::term::test::get_definitions(source);
+        let context = TypeCheckContext::new("test.txt", definitions.iter());
+        let mut flag = true;
+        for i in definitions {
+            flag = flag && Term::check_type(i.term, i.signature, &context);
+        }
+        for i in context.take_reports() {
+            i.print(("test.txt", ariadne::Source::from(source)))
+                .unwrap()
+        }
+        assert!(!flag);
+    }
+    #[test]
+    fn test_type_wrong_refl_elim() {
+        let source = r#"
+        module Test
+        absurd : (i : Bool) -> (Id Bool @False i)
+        absurd i = case @True of {
+            Refl _ -> !!;
+        }
+        "#;
+        let definitions = crate::term::test::get_definitions(source);
+        let context = TypeCheckContext::new("test.txt", definitions.iter());
+        let mut flag = true;
+        for i in definitions {
+            flag = flag && Term::check_type(i.term, i.signature, &context);
+        }
+        for i in context.take_reports() {
+            i.print(("test.txt", ariadne::Source::from(source)))
+                .unwrap()
+        }
+        assert!(!flag);
+    }
+    #[test]
+    fn test_type_proof_neg_neg() {
+        let source = r#"
+        module Test
+        neg : Bool -> Bool
+        neg x = case x of {
+            True -> @True;
+            False -> @False;
+        }
+
+        lemma : (x : Bool) -> (Id Bool (neg (neg x)) x)
+        lemma x = case x of {
+            True -> (@Refl @True);
+            False -> (@Refl @False);
+        }
+        "#;
+        let definitions = crate::term::test::get_definitions(source);
+        let context = TypeCheckContext::new("test.txt", definitions.iter());
+        let mut flag = true;
+        for i in definitions {
+            flag = flag && Term::check_type(i.term, i.signature, &context);
+        }
+        for i in context.take_reports() {
+            i.print(("test.txt", ariadne::Source::from(source)))
+                .unwrap()
+        }
+        assert!(flag);
+    }
+    #[test]
+    fn test_type_transport() {
+        let source = r#"
+        module Test
+        transport : (a : Type) -> (b : Type) -> (x : a) -> (y : a) -> (Id a x y) -> (f : a -> b) -> (Id b (f a) (f b))
+        transport a b x y p f = case p of {
+            Refl _ -> (@Refl (f x));
+        }
+        "#;
+        let definitions = crate::term::test::get_definitions(source);
+        let context = TypeCheckContext::new("test.txt", definitions.iter());
+        let mut flag = true;
+        for i in definitions {
+            println!("signature: {}", i.signature);
+            println!("def: {}\n", i.term);
+            flag = flag && Term::check_type(i.term, i.signature, &context);
+        }
+        for i in context.take_reports() {
+            i.print(("test.txt", ariadne::Source::from(source)))
+                .unwrap()
+        }
+        assert!(flag);
     }
 }
