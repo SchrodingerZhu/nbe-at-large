@@ -264,7 +264,7 @@ impl BidirectionalTypeCheck for Term {
             (Term::Lam(name, body), Some((_, Term::Pi(a, bnd)))) => {
                 let name = name.clone().unwrap_or_else(|| ctx.fresh());
                 let _guard = ctx.push_type(name.clone(), a.clone());
-                let var = RcPtr::new(a.location.clone(), Term::Variable(name));
+                let var = RcPtr::new(term.location.start..body.location.start - 1 , Term::Variable(name));
                 let app = RcPtr::new(bnd.location.clone(), Term::App(bnd.clone(), var));
                 if Term::check_type(body.clone(), app, ctx) {
                     target.clone()
