@@ -479,8 +479,9 @@ impl BidirectionalTypeCheck for Term {
                         let tx = Self::whnf(ctx, tx);
                         match tx.data.as_ref() {
                             Term::IdType(t, a, b) => {
-                                let _guard0 = y.as_ref().map(|y| ctx.push_type(y.clone(), t.clone()));
-                                let var = RcPtr::new(z.location.clone(), Term::Variable(y.clone().unwrap_or_else(|| ctx.fresh())));
+                                let ny = y.clone().unwrap_or_else(|| ctx.fresh());
+                                let _guard0 = ctx.push_type(ny.clone(), t.clone());
+                                let var = RcPtr::new(z.location.clone(), Term::Variable(ny));
                                 let _guard1 = def(a.clone(), var.clone(), ctx);
                                 let _guard2 = def(b.clone(), var.clone(), ctx);
                                 let _guard3 = def(x.clone(), RcPtr::new(x.location.clone(), Term::IdIntro(var)), ctx);
@@ -836,12 +837,12 @@ mod test {
 
         idFunc : (x : Type) -> (y : Type) -> (Id Type x y) -> x -> y
         idFunc x y p = case p of {
-            Refl u -> \ a . a;
+            Refl _ -> \ a . a;
         }
 
         pathInv : (t : Type) -> (x : t) -> (y : t) -> (Id t x y) -> (Id t y x)
         pathInv t x y p = case p of {
-            Refl u -> p;
+            Refl _ -> p;
         }
 
         lemma : (x : Bool) -> (neg (Id Bool x (not x)))
