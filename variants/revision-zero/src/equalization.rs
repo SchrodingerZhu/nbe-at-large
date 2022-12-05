@@ -1,5 +1,5 @@
 use crate::alpha_equality::AlphaEquality;
-use crate::term::{Name, RcPtr, Term};
+use crate::term::{self, Guard, Name, RcPtr, Term};
 use crate::typecheck::TypeCheckContext;
 use crate::whnf::WeakHeadNF;
 use ariadne::{Color, Label};
@@ -34,6 +34,10 @@ impl Equalization for Term {
         }
         let x = Term::whnf(ctx, x.clone());
         let y = Term::whnf(ctx, y.clone());
+        #[cfg(feature = "debug")]
+        {
+            eprintln!("equating {} with {}", x, y);
+        }
         match (x.data.as_ref(), y.data.as_ref()) {
             (Term::Type, Term::Type)
             | (Term::TrustMe, Term::TrustMe)
@@ -46,17 +50,48 @@ impl Equalization for Term {
             // they are currently not resolved within the scope, thus we directly
             // compare whether they are refering to the name object.
             (Term::Variable(a), Term::Variable(b)) if a == b => true,
-            (Term::Lam(_, x), Term::Lam(_, y))
             | (Term::IdIntro(x), Term::IdIntro(y))
             => Self::equalize(x, y, ctx, typecheck),
 
+            (Term::Lam(nx, x0), Term::Lam(ny, y0)) => {
+                let _guard = if let (Some(nx), Some(ny)) = (nx, ny) {
+                    Some(ctx.push_def(ny.clone(), RcPtr::new(x.location.start..x0.location.start, Term::Variable(nx.clone()))))
+                } else {
+                    None
+                };
+                Self::equalize(x0, y0, ctx, typecheck)
+            }
+
+            (Term::SigmaElim(x0, nx, mx, x1), Term::SigmaElim(y0, ny, my, y1)) => {
+                Self::equalize(x0, y0, ctx, typecheck) && {
+                    let _guard = if let (Some(nx), Some(ny)) = (nx, ny) {
+                        Some(ctx.push_def(ny.clone(), RcPtr::new(x0.location.end..x1.location.start, Term::Variable(nx.clone()))))
+                    } else {
+                        None
+                    };
+                    let _guard = if let (Some(mx), Some(my)) = (mx, my) {
+                        Some(ctx.push_def(my.clone(), RcPtr::new(x0.location.start..x1.location.start, Term::Variable(mx.clone()))))
+                    } else {
+                        None
+                    };
+                    Self::equalize(x1, y1, ctx, typecheck)
+                }
+            }
+            (Term::IdElim(x0, nx,  x1), Term::IdElim(y0, ny, y1)) => {
+                Self::equalize(x0, y0, ctx, typecheck) && {
+                    let _guard = if let (Some(nx), Some(ny)) = (nx, ny) {
+                        Some(ctx.push_def(ny.clone(), RcPtr::new(x0.location.end..x1.location.start, Term::Variable(nx.clone()))))
+                    } else {
+                        None
+                    };
+                    Self::equalize(x1, y1, ctx, typecheck)
+                }
+            }
             (Term::App(x0, x1), Term::App(y0, y1))
             | (Term::Pi(x0, x1), Term::Pi(y0, y1))
             | (Term::UnitElim(x0, x1), Term::UnitElim(y0, y1))
             | (Term::SigmaType(x0, x1), Term::SigmaType(y0, y1))
             | (Term::SigmaIntro(x0, x1), Term::SigmaIntro(y0, y1))
-            | (Term::SigmaElim(x0, _, _, x1), Term::SigmaElim(y0, _, _, y1))
-            | (Term::IdElim(x0, _,  x1), Term::IdElim(y0, _, y1))
             //| (Term::Let(_, x0, x1), Term::Let(_, y0, y1)) -- this should not appear at WHNF
             => {
                 Self::equalize(x0, y0, ctx, typecheck) && Self::equalize(x1, y1, ctx, typecheck)

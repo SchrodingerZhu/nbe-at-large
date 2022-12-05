@@ -839,7 +839,7 @@ mod test {
         transport t a x y = 
             let motive : (x : t) -> (y : t) -> (Id t x y) -> Type = λ x y _ . (a x) -> (a y) in
             let base : (x : t) -> (a x) -> (a x) = λ x . λ ax . ax in
-            (pathInduction t motive λ x . λ ax . ax x y)
+            (pathInduction t motive base x y)
         "#;
         let definitions = crate::term::test::get_definitions(source);
         let context = TypeCheckContext::new("test.txt", definitions.iter());
