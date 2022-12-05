@@ -209,7 +209,6 @@ fn def<'src, 'ctx>(
     let nfx = Term::whnf(ctx, x);
     let nfy = Term::whnf(ctx, y);
     match (nfx.data.as_ref(), nfy.data.as_ref()) {
-        (Term::Variable(_), Term::Variable(_)) => None,
         (Term::Variable(x), _) => Some(ctx.push_def(x.clone(), nfy)),
         (_, Term::Variable(y)) => Some(ctx.push_def(y.clone(), nfx)),
         _ => None,
@@ -222,7 +221,9 @@ impl BidirectionalTypeCheck for Term {
         target: Option<Self::Wrapper<Self>>,
         ctx: &Self::Context<'a>,
     ) -> Option<Self::Wrapper<Self>> {
+        #[cfg(feature = "debug")]
         let debug_target = target.clone();
+        #[cfg(feature = "debug")]
         let debug_term = term.clone();
         let result = match (
             term.data.as_ref(),
@@ -479,12 +480,12 @@ impl BidirectionalTypeCheck for Term {
             }
             (Term::IdElim(x, y, z), Some(_)) => {
                 Self::infer_type(x.clone(), ctx)
-                    .and_then(|x| {
-                        let x = Self::whnf(ctx, x);
-                        match x.data.as_ref() {
+                    .and_then(|tx| {
+                        let tx = Self::whnf(ctx, tx);
+                        match tx.data.as_ref() {
                             Term::IdType(t, a, b) => {
                                 let _guard0 = y.as_ref().map(|y| ctx.push_type(y.clone(), t.clone()));
-                                let _guard1 = y.as_ref().map(|y| ctx.push_def(y.clone(), x.clone()));
+                                let _guard1 = y.as_ref().map(|y| ctx.push_def(y.clone(), a.clone()));
                                 let _guard2 = def(a.clone(), b.clone(), ctx);
                                 let _guard3 = def(x.clone(), RcPtr::new(x.location.clone(), Term::IdIntro(a.clone())), ctx);
                                 if Self::check_type(z.clone(), unsafe { target.clone().unwrap_unchecked() }, ctx) {
@@ -534,18 +535,26 @@ impl BidirectionalTypeCheck for Term {
                 None
             },
         };
-        if let Some(target) = debug_target.as_ref() {
-            eprintln!("type checking {} against {}", debug_term, target);
-        } else {
-            eprintln!("infer {}", debug_term);
-        }
-        eprintln!(
-            "context: {:?}",
-            unsafe { (*ctx.local_types.get()).iter() }.collect::<Vec<_>>()
-        );
-        match result.as_ref() {
-            Some(x) => eprintln!("result: {}\n", x),
-            None => eprintln!("result: failed\n"),
+        #[cfg(feature = "debug")]
+        {
+            if let Some(target) = debug_target.as_ref() {
+                eprintln!("type checking: {}\n  - target: {}", debug_term, target);
+            } else {
+                eprintln!("inferring: {}", debug_term);
+            }
+            eprintln!("  - local types:",);
+            for i in unsafe { (*ctx.local_types.get()).iter() } {
+                eprintln!("    - {} : {}", i.0.literal(), i.1);
+            }
+            eprintln!("  - local defintions:",);
+            for i in unsafe { (*ctx.local_defs.get()).iter() } {
+                eprintln!("    - {} = {}", i.0.literal(), i.1);
+            }
+
+            match result.as_ref() {
+                Some(x) => eprintln!("  - result: {}\n", x),
+                None => eprintln!("  - result: failed\n"),
+            }
         }
         result
     }
@@ -559,7 +568,7 @@ impl BidirectionalTypeCheck for Term {
             Term::Variable(x) if x.literal() == "u" => {
                 let nf = Self::whnf(ctx, term);
                 Self::check_term(nf, None, ctx)
-            },
+            }
             _ => Self::check_term(Self::whnf(ctx, term), None, ctx),
         }
     }
@@ -800,17 +809,15 @@ mod test {
     fn test_type_transport() {
         let source = r#"
         module Test
-        transport : (a : Type) -> (b : Type) -> (x : a) -> (y : a) -> (Id a x y) -> (f : a -> b) -> (Id b (f a) (f b))
+        transport : (a : Type) -> (b : Type) -> (x : a) -> (y : a) -> (Id a x y) -> (f : a -> b) -> (Id b (f x) (f y))
         transport a b x y p f = case p of {
-            Refl _ -> (@Refl (f x));
+            Refl u -> (@Refl (f u));
         }
         "#;
         let definitions = crate::term::test::get_definitions(source);
         let context = TypeCheckContext::new("test.txt", definitions.iter());
         let mut flag = true;
         for i in definitions {
-            println!("signature: {}", i.signature);
-            println!("def: {}\n", i.term);
             flag = flag && Term::check_type(i.term, i.signature, &context);
         }
         for i in context.take_reports() {
