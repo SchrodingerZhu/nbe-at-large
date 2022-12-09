@@ -348,11 +348,13 @@ impl BidirectionalTypeCheck for Term {
             (Term::UnitElim(x, y), Some(_)) => {
                 let unit_type = RcPtr::new(x.location.clone(), Term::UnitType);
                 if Self::check_type(x.clone(), unit_type, ctx)
-                    && Self::check_type(
+                    && {
+                        let _guard = def(x.clone(), RcPtr::new(x.location.clone(), Term::UnitIntro), ctx);
+                        Self::check_type(
                         y.clone(),
                         unsafe { target.clone().unwrap_unchecked() },
                         ctx,
-                    )
+                    ) }
                 {
                     target
                 } else {
