@@ -464,7 +464,7 @@ impl BidirectionalTypeCheck for Term {
             }
             (Term::IdIntro(a), Some((_, Term::IdType(t, x, y)))) => {
                 if Self::check_type(a.clone(), t.clone(), ctx) {
-                    if Term::equalize(x , y, ctx, false) {
+                    if Term::equalize(a , x, ctx, false) && Term::equalize(a , y, ctx, false)  {
                         target
                     } else {
                         None
